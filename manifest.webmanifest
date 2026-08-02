@@ -1,0 +1,20 @@
+{
+  "name": "Русские шашки — анализатор партий",
+  "short_name": "Шашки",
+  "description": "Анализ партий в русские шашки: дерево ходов, PDN 3.0, расстановка позиций, экспорт SVG.",
+  "lang": "ru",
+  "dir": "ltr",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#171009",
+  "theme_color": "#171009",
+  "categories": ["games", "education", "sports"],
+  "icons": [
+    { "src": "./icons/icon.svg",          "sizes": "any",     "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-192.png",       "sizes": "192x192", "type": "image/png",     "purpose": "any" },
+    { "src": "./icons/icon-512.png",       "sizes": "512x512", "type": "image/png",     "purpose": "any" },
+    { "src": "./icons/icon-maskable.png",  "sizes": "512x512", "type": "image/png",     "purpose": "maskable" }
+  ] 
+}
