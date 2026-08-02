@@ -6,7 +6,7 @@ FEN‑плашкой и экспортом в **SVG**, семь цветовых
 Чистый JavaScript (ES‑модули), **без зависимостей и без сборки** — открывается
 прямо из файлов или с GitHub Pages.
 
-> Живое демо: *<ссылка на ваш GitHub Pages появится после выкладки — см. `docs/DEPLOY.md`>*
+> Живое демо: https://go-0dboy.github.io/checkers-analyzer/
 
 ## Возможности
 
@@ -32,8 +32,12 @@ FEN‑плашкой и экспортом в **SVG**, семь цветовых
 ## Быстрый старт (локально)
 
 ```bash
-git clone https://github.com/<ваш-логин>/checkers-analyzer.git
+git clone https://github.com/go-0dboy/checkers-analyzer.git
 cd checkers-analyzer
 # любой статический сервер, например:
 python3 -m http.server 8000
 # открыть http://localhost:8000
+
+## Скриншоты
+![Анализ партии](docs/screenshots/analysis.png)
+![Расстановка позиции](docs/screenshots/setup.png)
