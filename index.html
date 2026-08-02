@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark" data-board="classic">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Русские шашки — анализатор партий</title>
+  <meta name="description" content="Анализатор партий в русские шашки: дерево ходов с вариациями и комментариями, PDN 3.0, расстановка позиций, экспорт в SVG, темы и скины доски.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#171009">
+  <!-- Open Graph: превью при шаринге ссылки на репозиторий/страницу -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Русские шашки — анализатор партий">
+  <meta property="og:description" content="Дерево ходов, PDN 3.0, расстановка позиций, экспорт SVG, темы и скины. Чистый JS, без зависимостей.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+
+  <div class="ambient" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <button id="menu-toggle" class="icon-btn hamburger" aria-label="Открыть меню" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+
+    <a class="brand" href="#" onclick="return false">
+      <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+        <circle cx="24" cy="24" r="21" class="bm-outer"></circle>
+        <circle cx="24" cy="24" r="13.5" class="bm-mid"></circle>
+        <circle cx="24" cy="24" r="6.5" class="bm-core"></circle>
+      </svg>
+      <span class="brand-text">
+        <strong>Русские шашки</strong>
+        <em>анализатор партий · PDN</em>
+      </span>
+    </a>
+
+    <nav id="main-menu" class="menu" aria-label="Главное меню">
+      <button class="menu-btn" data-action="analyze">Анализировать</button>
+      <button class="menu-btn" data-action="setup">Расстановка позиции</button>
+
+      <div class="menu-group">
+        <button class="menu-btn" data-toggle="load-menu" aria-haspopup="true">
+          Загрузить PDN <span class="caret">▾</span>
+        </button>
+        <div class="submenu" id="load-menu" role="menu">
+          <button role="menuitem" data-action="load-file">Из файла…</button>
+          <button role="menuitem" data-action="load-clip">Из буфера обмена…</button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button class="menu-btn" data-toggle="save-menu" aria-haspopup="true">
+          Сохранить PDN <span class="caret">▾</span>
+        </button>
+        <div class="submenu" id="save-menu" role="menu">
+          <button role="menuitem" data-action="save-file">В файл…</button>
+          <button role="menuitem" data-action="save-clip">В буфер обмена</button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="topbar-actions">
+      <!-- Пикер скина доски и фигур (модуль themes.js) -->
+      <div class="board-picker">
+        <button id="board-toggle" class="icon-btn" aria-haspopup="true" aria-expanded="false"
+                title="Вид доски и фигур" aria-label="Вид доски и фигур">
+          <svg class="icon-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/>
+            <path d="M12 3.5v17M3.5 12h17"/>
+            <circle cx="7.75" cy="7.75" r="1.7" fill="currentColor" stroke="none"/>
+            <circle cx="16.25" cy="16.25" r="1.7" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+        <div class="board-menu" id="board-menu" role="menu" aria-label="Выбор вида доски">
+          <button class="board-opt" data-board="classic"  role="menuitem"><span class="board-swatch"></span><span class="board-name">Классика</span><span class="board-check">✓</span></button>
+          <button class="board-opt" data-board="marble"   role="menuitem"><span class="board-swatch"></span><span class="board-name">Мрамор</span><span class="board-check">✓</span></button>
+          <button class="board-opt" data-board="green"    role="menuitem"><span class="board-swatch"></span><span class="board-name">Сукно</span><span class="board-check">✓</span></button>
+          <button class="board-opt" data-board="cherry"   role="menuitem"><span class="board-swatch"></span><span class="board-name">Вишня</span><span class="board-check">✓</span></button>
+          <button class="board-opt" data-board="ocean"    role="menuitem"><span class="board-swatch"></span><span class="board-name">Океан</span><span class="board-check">✓</span></button>
+          <button class="board-opt" data-board="graphite" role="menuitem"><span class="board-swatch"></span><span class="board-name">Графит</span><span class="board-check">✓</span></button>
+          <button class="board-opt" data-board="sand"     role="menuitem"><span class="board-swatch"></span><span class="board-name">Песок</span><span class="board-check">✓</span></button>
+        </div>
+      </div>
+
+      <!-- Пикер цветовой темы (модуль themes.js) -->
+      <div class="theme-picker">
+        <button id="theme-toggle" class="icon-btn" aria-haspopup="true" aria-expanded="false"
+                title="Тема оформления" aria-label="Тема оформления">
+          <svg class="icon-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="13.5" cy="6.5" r=".6" fill="currentColor" stroke="none"/>
+            <circle cx="17.5" cy="10.5" r=".6" fill="currentColor" stroke="none"/>
+            <circle cx="8.5" cy="7.5" r=".6" fill="currentColor" stroke="none"/>
+            <circle cx="6.5" cy="12.5" r=".6" fill="currentColor" stroke="none"/>
+            <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.83-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.66h2c3.05 0 5.55-2.5 5.55-5.56C21.97 6.01 17.46 2 12 2Z"/>
+          </svg>
+        </button>
+        <div class="theme-menu" id="theme-menu" role="menu" aria-label="Выбор темы">
+          <button class="theme-opt" data-theme="dark"     role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Орех</span><span class="theme-check">✓</span></button>
+          <button class="theme-opt" data-theme="light"    role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Пергамент</span><span class="theme-check">✓</span></button>
+          <button class="theme-opt" data-theme="forest"   role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Изумруд</span><span class="theme-check">✓</span></button>
+          <button class="theme-opt" data-theme="midnight" role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Полночь</span><span class="theme-check">✓</span></button>
+          <button class="theme-opt" data-theme="stone"    role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Камень</span><span class="theme-check">✓</span></button>
+          <button class="theme-opt" data-theme="wine"     role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Бордо</span><span class="theme-check">✓</span></button>
+          <button class="theme-opt" data-theme="teal"     role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Океан</span><span class="theme-check">✓</span></button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="app">
+
+    <section class="board-zone" aria-label="Игровая доска">
+
+      <!-- Плашка игрока: индикатор хода, счёт фигур, бейджи результата/взятия -->
+      <div class="player-bar" id="player-top">
+        <span class="player-disc disc-black" aria-hidden="true"></span>
+        <span class="player-name">Чёрные</span>
+        <span class="player-meta" id="meta-top"></span>
+        <span class="player-result" id="result-top" hidden></span>
+        <span class="player-capture" id="capture-top" hidden>взятие</span>
+        <span class="captured-tray" id="captured-top" aria-label="Съеденные шашки чёрных"></span>
+      </div>
+
+      <div class="board-shell">
+        <div class="board-frame" id="board-frame">
+          <div class="coords coords-top"    data-coords="files-top"    aria-hidden="true"></div>
+          <div class="coords coords-left"   data-coords="ranks-left"   aria-hidden="true"></div>
+          <div id="board" class="board" role="grid" aria-label="Доска 8 на 8"></div>
+          <div class="coords coords-right"  data-coords="ranks-right"  aria-hidden="true"></div>
+          <div class="coords coords-bottom" data-coords="files-bottom" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <div class="player-bar" id="player-bottom">
+        <span class="player-disc disc-white" aria-hidden="true"></span>
+        <span class="player-name">Белые</span>
+        <span class="player-meta" id="meta-bottom"></span>
+        <span class="player-result" id="result-bottom" hidden></span>
+        <span class="player-capture" id="capture-bottom" hidden>взятие</span>
+        <span class="captured-tray" id="captured-bottom" aria-label="Съеденные шашки белых"></span>
+      </div>
+
+      <!-- Панель навигации и действий над партией -->
+      <div class="controls" id="controls" role="toolbar" aria-label="Управление партией">
+        <button id="btn-new" class="ctrl-btn ctrl-new" title="Новая партия" aria-label="Новая партия">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
+            <path d="M14 3v5h5"/>
+            <path d="M12 11.5v5M9.5 14h5"/>
+          </svg>
+        </button>
+        <span class="ctrl-sep" aria-hidden="true"></span>
+        <button id="btn-start" class="ctrl-btn" title="К началу (Home)">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2.4v14H6zM19 5v14l-8.4-7z"/></svg>
+        </button>
+        <button id="btn-prev" class="ctrl-btn" title="Назад (←)">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 5v14L7 12z"/></svg>
+        </button>
+        <button id="btn-next" class="ctrl-btn" title="Вперёд (→)">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 5v14L17 12z"/></svg>
+        </button>
+        <button id="btn-end" class="ctrl-btn" title="В конец (End)">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 5H18v14h-2.4zM5 5v14l8.4-7z"/></svg>
+        </button>
+        <span class="ctrl-sep" aria-hidden="true"></span>
+        <button id="btn-flip" class="ctrl-btn" title="Перевернуть доску (F)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4.5 9a8 8 0 0 1 13.7-3.1L20.5 8M20.5 3.5V8H16M19.5 15a8 8 0 0 1-13.7 3.1L3.5 16M3.5 20.5V16H8"/>
+          </svg>
+        </button>
+        <span class="ctrl-sep" aria-hidden="true"></span>
+        <button id="btn-comment" class="ctrl-btn" title="Комментарий к ходу" aria-label="Комментарий к ходу">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 8h7M7 12h5"/>
+            <path d="M21 12a8 8 0 0 1-11.3 7.3L4 21l1.7-5.7A8 8 0 1 1 21 12Z"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Панель расстановки позиции (видна только в режиме setup) -->
+      <section class="setup-panel" id="setup-panel" hidden>
+        <div class="setup-bar">
+          <div class="setup-tools">
+            <button class="tool active" data-tool="w" title="Белая шашка"><span class="piece white mini"></span></button>
+            <button class="tool" data-tool="W" title="Белая дамка"><span class="piece white king mini"></span></button>
+            <button class="tool" data-tool="b" title="Чёрная шашка"><span class="piece black mini"></span></button>
+            <button class="tool" data-tool="B" title="Чёрная дамка"><span class="piece black king mini"></span></button>
+            <button class="tool" data-tool="erase" title="Ластик">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4l8 8-8 8zM9 17l-5-5M20 20H9"/></svg>
+            </button>
+            <span class="tool-sep" aria-hidden="true"></span>
+            <button class="tool icon-tool" id="btn-setup-clear" title="Очистить доску">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6"/></svg>
+            </button>
+            <button class="tool icon-tool" id="btn-setup-initial" title="Начальная расстановка">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><circle cx="8" cy="8" r="1.7" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.7" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.7" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.7" fill="currentColor" stroke="none"/></svg>
+            </button>
+            <span class="tool-sep" aria-hidden="true"></span>
+            <button class="tool icon-tool" id="btn-setup-svg" title="Сохранить позицию в SVG" aria-label="Сохранить позицию в SVG">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3.5" y="4" width="17" height="12.5" rx="2.5"/>
+                <circle cx="8.3" cy="8.6" r="1.5" fill="currentColor" stroke="none"/>
+                <path d="M4 14.5l4.2-3.6 3.2 2.8 3-2.4L20 14.5"/>
+                <path d="M12 16.5v4.5M9.2 18.8h5.6"/>
+              </svg>
+            </button>
+          </div>
+          <div class="setup-row">
+            <span class="setup-label">Ход:</span>
+            <div class="turn-choice">
+              <button class="active" data-turn-choice="w">Белые</button>
+              <button data-turn-choice="b">Чёрные</button>
+            </div>
+            <button class="btn-secondary compact" id="btn-setup-cancel">Отмена</button>
+            <button class="btn-primary compact" id="btn-setup-apply">Применить</button>
+          </div>
+          <div class="setup-fen-bar" id="setup-fen-bar" title="Текущая расстановка в формате FEN">
+            <span class="sfen-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="8 9 5 12 8 15"/>
+                <polyline points="16 9 19 12 16 15"/>
+              </svg>
+              FEN
+            </span>
+            <code class="sfen-text" id="setup-fen-text"></code>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <aside class="side-panel">
+      <!-- Паспорт тегов PDN в режиме расстановки -->
+      <section class="panel setup-meta-panel" id="setup-meta-panel" hidden>
+        <header class="panel-head">
+          <h2>
+            <svg class="sm-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3.5 12.5 11 5a2 2 0 0 1 1.4-.6H19a1.5 1.5 0 0 1 1.5 1.5v6.6a2 2 0 0 1-.6 1.4l-7.5 7.5a2 2 0 0 1-2.8 0l-6.1-6.1a2 2 0 0 1 0-2.8Z"/>
+              <circle cx="16" cy="8" r="1.4" fill="currentColor" stroke="none"/>
+            </svg>
+            Теги PDN
+          </h2>
+          <span class="panel-hint sm-hint"><span class="sm-live-dot"></span><span id="sm-count">0 / 7</span></span>
+        </header>
+        <div class="sm-body">
+          <label class="field"><span class="field-label">Турнир · Event</span><input id="sm-f-event" type="text" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Место · Site</span><input id="sm-f-site" type="text" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Белые · White</span><input id="sm-f-white" type="text" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Чёрные · Black</span><input id="sm-f-black" type="text" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Дата · Date</span><input id="sm-f-date" type="text" spellcheck="false" autocomplete="off" placeholder="ГГГГ.ММ.ДД"></label>
+          <label class="field"><span class="field-label">Тур · Round</span><input id="sm-f-round" type="text" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span class="field-label">Результат · Result</span>
+            <select id="sm-f-result">
+              <option value="*">* — не окончена</option>
+              <option value="1-0">1-0 — победа белых</option>
+              <option value="0-1">0-1 — победа чёрных</option>
+              <option value="1/2-1/2">1/2-1/2 — ничья</option>
+              <option value="2-0">2-0 — белые (очки)</option>
+              <option value="0-2">0-2 — чёрные (очки)</option>
+              <option value="1-1">1-1 — ничья (очки)</option>
+            </select>
+          </label>
+          <div class="sm-preview-wrap">
+            <span class="sm-preview-label">Предпросмотр заголовков</span>
+            <pre class="sm-preview" id="sm-preview"></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- Афиша метаданных партии в режиме анализа -->
+      <section class="panel meta-panel" id="meta-panel">
+        <header class="panel-head">
+          <h2>Партия</h2>
+          <span class="panel-hint">теги PDN</span>
+        </header>
+        <div class="meta-body" id="meta-body"></div>
+      </section>
+
+      <!-- Дерево нотации -->
+      <section class="panel notation-panel" id="notation-panel">
+        <header class="panel-head">
+          <h2>Нотация</h2>
+          <span class="panel-hint">клик по ходу — переход по позиции</span>
+        </header>
+        <div class="movelist" id="movelist" tabindex="0" aria-label="Дерево ходов"></div>
+      </section>
+    </aside>
+  </main>
+
+  <!-- Модалка загрузки PDN -->
+  <div class="modal-backdrop" id="pdn-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pdn-modal-title">
+      <header class="modal-head">
+        <h3 id="pdn-modal-title">PDN</h3>
+        <button class="modal-close" data-close aria-label="Закрыть">✕</button>
+      </header>
+      <textarea id="pdn-text" spellcheck="false" placeholder="[Event &quot;…&quot;]&#10;1. c3-d4 f6-g5 …"></textarea>
+      <footer class="modal-foot">
+        <button class="btn-secondary" data-close>Отмена</button>
+        <button class="btn-primary" id="pdn-apply">Применить</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Модалка редактора тегов перед сохранением -->
+  <div class="modal-backdrop" id="save-modal" hidden>
+    <div class="modal save-modal" role="dialog" aria-modal="true" aria-labelledby="save-title">
+      <header class="modal-head">
+        <h3 id="save-title">
+          <svg class="save-tag-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3.5 12.5 11 5a2 2 0 0 1 1.4-.6H19a1.5 1.5 0 0 1 1.5 1.5v6.6a2 2 0 0 1-.6 1.4l-7.5 7.5a2 2 0 0 1-2.8 0l-6.1-6.1a2 2 0 0 1 0-2.8Z"/>
+            <circle cx="16" cy="8" r="1.4" fill="currentColor" stroke="none"/>
+          </svg>
+          <span id="save-title-text">Сохранить PDN</span>
+        </h3>
+        <button class="modal-close" data-close aria-label="Закрыть">✕</button>
+      </header>
+      <div class="save-grid">
+        <label class="field"><span class="field-label">Турнир · Event</span><input id="save-f-event" type="text" spellcheck="false" autocomplete="off"></label>
+        <label class="field"><span class="field-label">Место · Site</span><input id="save-f-site" type="text" spellcheck="false" autocomplete="off"></label>
+        <label class="field"><span class="field-label">Белые · White</span><input id="save-f-white" type="text" spellcheck="false" autocomplete="off"></label>
+        <label class="field"><span class="field-label">Чёрные · Black</span><input id="save-f-black" type="text" spellcheck="false" autocomplete="off"></label>
+        <label class="field"><span class="field-label">Дата · Date</span><input id="save-f-date" type="text" spellcheck="false" autocomplete="off" placeholder="ГГГГ.ММ.ДД"></label>
+        <label class="field"><span class="field-label">Тур · Round</span><input id="save-f-round" type="text" spellcheck="false" autocomplete="off"></label>
+        <label class="field field-wide"><span class="field-label">Результат · Result</span>
+          <select id="save-f-result">
+            <option value="*">* — не окончена</option>
+            <option value="1-0">1-0 — победа белых</option>
+            <option value="0-1">0-1 — победа чёрных</option>
+            <option value="1/2-1/2">1/2-1/2 — ничья</option>
+            <option value="2-0">2-0 — белые (очки)</option>
+            <option value="0-2">0-2 — чёрные (очки)</option>
+            <option value="1-1">1-1 — ничья (очки)</option>
+          </select>
+        </label>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn-secondary" data-close>Отмена</button>
+        <button class="btn-primary" id="save-apply">Сохранить</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Модалка комментария к ходу -->
+  <div class="modal-backdrop" id="comment-modal" hidden>
+    <div class="modal comment-modal" role="dialog" aria-modal="true" aria-labelledby="comment-title">
+      <header class="modal-head">
+        <h3 id="comment-title"><span id="comment-title-text">Комментарий</span></h3>
+        <button class="modal-close" data-close aria-label="Закрыть">✕</button>
+      </header>
+      <textarea id="comment-text" spellcheck="true" placeholder="Текст комментария (фигурные скобки добавятся автоматически)"></textarea>
+      <footer class="modal-foot">
+        <button class="btn-secondary danger-text" id="comment-delete" hidden>Удалить</button>
+        <span class="foot-spacer"></span>
+        <button class="btn-secondary" data-close>Отмена</button>
+        <button class="btn-primary" id="comment-apply">Сохранить</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <input type="file" id="file-input" accept=".pdn,.txt,application/octet-stream" hidden>
+
+  <noscript><p style="padding:2rem;text-align:center">Для работы анализатора необходим JavaScript.</p></noscript>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# ОС
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Редакторы / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Логи и временные файлы
+*.log
+npm-debug.log*
+*.tmp
+*.bak
+
+# Зависимости (если когда-нибудь появятся)
+node_modules/
+
+# Локальные настройки сервера
+.server/
