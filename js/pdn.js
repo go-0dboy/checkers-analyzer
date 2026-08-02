@@ -5,22 +5,21 @@
  * Принцип «чтение либерально, запись строго» (стандарт, §1.2):
  *   • при ЗАПИСИ соблюдаем grammar §4.1 + restrictions §4.2;
  *   • при ЧТЕНИИ используем reading grammar §4.4 (разделитель взятия [x:],
- *     многоточия, лидирующие нули и т.п.) и терпим распространённые вольности.
+ *     многоточия, лидирующие нули) и терпим распространённые вольности,
+ *     включая НЕДОПУСТИМЫЕ ходы в OCR-файлах: такой ход пропускается
+ *     (сбор в `skipped`), а разбор продолжается, чтобы одна опечатка не
+ *     обрушивала загрузку всего дебютного дерева.
  *
- * Соответствие стандарту (ссылки на разделы):
- *   §3   теги (Event/Site/Date/Round/White/Black/Result/GameType/FEN …);
- *   §4.1 grammar: теги, ходы, вариации ( ), комментарии { }, NAG $n;
- *   §4.2 restriction 7 — разделитель взятия по GameType;
- *   §4.2 restriction 8/9 — полная запись неоднозначных взятий (чтение терпит обе);
- *   §4.3 комментарии в фигурных скобках, вложенные вариации;
- *   §4.4 reading grammar — CAPTURESEPARATOR [x:], ELLIPSES, liberal tokens;
- *   §10  FEN (терпим завершающую точку и слитный цвет секции);
- *   §11  GameType → ResultType + capture separator (25/41 → ':').
+ * База вариации определяется по номеру/цвету её первого хода через стек
+ * магистрали (см. {@link chooseVariationBase}): это корректно обрабатывает
+ * как стандартные вариации-альтернативы последнего хода, так и книжные
+ * вариации-альтернативы «хода с тем же номером» от текущей позиции.
  *
- * Комментарии привязываются к ходам в двух фазах (до/после), чтобы round-trip
- * сохранял их позицию. Вариация «( … )» после хода X кладётся как СИБЛИНГ X
- * (ребёнок родителя X), а не как его продолжение — иначе магистраль и ветка
- * менялись бы местами при повторной загрузке.
+ * Соответствие стандарту:
+ *   §3 теги; §4.1/§4.2 grammar/restrictions; §4.3 комментарии {…} и вложенные
+ *   вариации; §4.4 reading grammar (CAPTURESEPARATOR [x:], ELLIPSES);
+ *   §10 FEN (терпим завершающую точку и слитный цвет секции);
+ *   §11 GameType → ResultType + capture separator (25/41 → ':').
  */
 
 import {
@@ -29,7 +28,8 @@ import {
   moveToString, stateToFEN, fenToState, getGameStatus, sepForGameType, setCaptureSep,
 } from './engine.js';
 
-// Токены: комментарий ловится целиком; порядок альтернатив не важен.
+// Токены: комментарий ловится целиком; номер хода СОХРАНЯЕТ value (нужен для
+// определения цвета/номера первого хода вариации).
 const TOKEN_RE = /\{[^}]*\}|\(|\)|1\/2-1\/2|\d+-\d+|\*|\d+\.+|[a-h][1-8](?:[x:×-][a-h][1-8])+/gi;
 
 function tokenize(text) {
@@ -44,7 +44,7 @@ function tokenize(text) {
     else if (raw === '(') tokens.push({ type: 'open' });
     else if (raw === ')') tokens.push({ type: 'close' });
     else if (/^(1-0|0-1|1\/2-1\/2|\*|\d+-\d+)$/.test(raw)) tokens.push({ type: 'result', value: raw });
-    else if (/^\d/.test(raw)) tokens.push({ type: 'number' });
+    else if (/^\d/.test(raw)) tokens.push({ type: 'number', value: raw });
     else tokens.push({ type: 'move', raw, squares: raw.toLowerCase().split(/[x:×-]/) });
   }
   if (text.slice(last).trim()) throw new Error(`Непонятный фрагмент в конце текста: «${text.slice(last).trim().slice(0, 24)}…»`);
@@ -58,7 +58,7 @@ function resolveMove(state, names, raw) {
   if (bad) throw new Error(`Неизвестная клетка «${bad}» в ходе «${raw}»`);
   const from = path[0], to = path[path.length - 1];
   const candidates = findMoves(state, from, to);
-  if (candidates.length === 0) throw new Error(`Ход «${raw}» недопустим в этой позиции — проверьте предыдущие ходы`);
+  if (candidates.length === 0) throw new Error(`Ход «${raw}» недопустим в этой позиции`);
   if (path.length > 2) {
     const exact = candidates.find((m) => m.path.length === path.length && m.path.every((s, k) => s === path[k]));
     if (exact) return exact;
@@ -69,11 +69,72 @@ function resolveMove(state, names, raw) {
 }
 
 /**
- * Рекурсивный разбор последовательности ходов на одном уровне.
- * Вариации уходят в lastHome (сиблинги lastNode), комментарии до первого хода
- * уровня — в pendingBefore этого хода.
+ * Заглядывает на первый ход вариации (пропуская номера и комментарии).
+ * @returns {{num:number|null, color:string|null, squares:Array|null, raw:string|null}}
+ *   num — номер хода; color — WHITE для «N.», BLACK для «N...»; squares/raw первого хода.
  */
-function parseSequence(tokens, pos, state, container, depth) {
+function peekFirstMove(tokens, start) {
+  let num = null, color = null;
+  for (let j = start; j < tokens.length; j++) {
+    const t = tokens[j];
+    if (t.type === 'number') {
+      const m = /^(\d+)/.exec(t.value);
+      num = m ? parseInt(m[1], 10) : null;
+      color = t.value.includes('...') ? BLACK : WHITE;
+      continue;
+    }
+    if (t.type === 'comment') continue;
+    if (t.type === 'move') return { num, color, squares: t.squares, raw: t.raw };
+    return { num: null, color: null, squares: null, raw: null };
+  }
+  return { num: null, color: null, squares: null, raw: null };
+}
+
+/** Пропускает вариацию целиком (от текущей «(» до парной «)»), учитывая вложенность. */
+function skipVariation(tokens, pos) {
+  let depth = 1; pos.i++;
+  while (pos.i < tokens.length && depth > 0) {
+    if (tokens[pos.i].type === 'open') depth++;
+    else if (tokens[pos.i].type === 'close') depth--;
+    pos.i++;
+  }
+}
+
+/**
+ * Выбирает базовую позицию и контейнер для вариации.
+ *  1) по номеру/цвету первого хода: целевой ply = 2·(N−1) для белых, 2·N−1 для
+ *     чёрных; ищем в стеке магистрали узел с таким state.plies — вариация
+ *     становится ребёнком этого узла (сиблингом хода, который она заменяет);
+ *  2) fallback: пробуем первый ход на легальность в cur и в lastNode.before.
+ * Для стандартных вариаций результат совпадает с lastNode.before (обратная совместимость).
+ */
+function chooseVariationBase(tokens, start, cur, lastNode, lastHome, container, lineNodes) {
+  const peek = peekFirstMove(tokens, start);
+  if (peek.num !== null && peek.color !== null) {
+    const target = peek.color === WHITE ? 2 * (peek.num - 1) : 2 * peek.num - 1;
+    for (const node of lineNodes) {
+      if (node.state.plies === target) return { base: node.state, cont: node.children };
+    }
+    if (lastNode && cur.plies === target) return { base: cur, cont: lastNode.children };
+  }
+  const cand = lastNode
+    ? [[cur, lastNode.children], [lastNode.before, lastHome]]
+    : [[cur, container]];
+  if (peek.color !== null) cand.sort((a, b) => (a[0].turn === peek.color ? 0 : 1) - (b[0].turn === peek.color ? 0 : 1));
+  if (peek.squares) {
+    for (const [b, vc] of cand) {
+      try { resolveMove(b, peek.squares, peek.raw); return { base: b, cont: vc }; } catch { /* пробуем следующую */ }
+    }
+  }
+  return { base: cand[0][0], cont: cand[0][1] };
+}
+
+/**
+ * Рекурсивный разбор последовательности ходов одного уровня.
+ * @param skipped массив, куда собираются пропущенные недопустимые ходы {raw, depth}
+ * @param lineNodes стек узлов магистрали текущего уровня (для базы вариаций)
+ */
+function parseSequence(tokens, pos, state, container, depth, skipped, lineNodes) {
   let cur = state, lastNode = null, lastHome = container, result = null, pendingBefore = [];
   while (pos.i < tokens.length) {
     const t = tokens[pos.i];
@@ -89,21 +150,35 @@ function parseSequence(tokens, pos, state, container, depth) {
         pos.i++;
         break;
       case 'open': {
-        if (!lastNode) throw new Error('Вариация «(» встречается до хода, который она заменяет');
+        if (!lastNode) { // вариация без предшествующего хода — безопасно пропускаем
+          skipped.push({ raw: '(вариация без хода)', depth });
+          skipVariation(tokens, pos);
+          break;
+        }
+        const { base, cont } = chooseVariationBase(tokens, pos.i + 1, cur, lastNode, lastHome, container, lineNodes);
         pos.i++;
-        const sub = parseSequence(tokens, pos, lastNode.before, lastHome, depth + 1); // ВАЖНО: lastHome, не lastNode.children
+        const sub = parseSequence(tokens, pos, base, cont, depth + 1, skipped, []);
         if (tokens[pos.i]?.type !== 'close') throw new Error('Вариация не закрыта скобкой «)»');
         pos.i++;
         if (sub.result) result = sub.result;
         break;
       }
       case 'move': {
-        const move = resolveMove(cur, t.squares, t.raw);
+        let move;
+        try {
+          move = resolveMove(cur, t.squares, t.raw);
+        } catch {
+          // либеральное чтение: недопустимый ход (обычно OCR-опечатка) пропускаем
+          skipped.push({ raw: t.raw, depth });
+          pos.i++;
+          continue;
+        }
         const next = makeMove(cur, move);
         const node = { move, state: next, before: cur, children: [], commentsBefore: pendingBefore, commentsAfter: [] };
         pendingBefore = [];
         const home = lastNode ? lastNode.children : container;
         home.push(node);
+        lineNodes.push(node);
         lastHome = home; lastNode = node; cur = next; pos.i++;
         break;
       }
@@ -114,7 +189,8 @@ function parseSequence(tokens, pos, state, container, depth) {
 
 /**
  * Парсит PDN-текст.
- * @returns {{headers:Object, result:string|null, rootState:Object, tree:Array}}
+ * @returns {{headers:Object, result:string|null, rootState:Object, tree:Array, skipped:Array}}
+ *   skipped — список пропущенных недопустимых ходов {raw, depth} (пуст для чистых файлов).
  */
 export function parsePDN(text) {
   if (!text || !text.trim()) throw new Error('Пустой текст PDN');
@@ -123,7 +199,6 @@ export function parsePDN(text) {
   let m;
   while ((m = tagRe.exec(text))) headers[m[1]] = m[2];
 
-  // чистим всё КРОМЕ комментариев {...} (их парсим как токены)
   const moveText = text
     .replace(/\[\s*[A-Za-z]\w*\s+"[^"]*"\s*\]/g, ' ')
     .replace(/;[^\n]*/g, ' ')
@@ -139,23 +214,21 @@ export function parsePDN(text) {
   } else {
     rootState = initialState();
   }
-  // разделитель взятия для отображения/записи — из GameType (§11), иначе ':'
   setCaptureSep(headers.GameType ? sepForGameType(headers.GameType) : ':');
 
   const tree = [];
+  const skipped = [];
   const pos = { i: 0 };
-  const parsed = parseSequence(tokens, pos, rootState, tree, 0);
+  const parsed = parseSequence(tokens, pos, rootState, tree, 0, skipped, []);
   if (tree.length === 0 && Object.keys(headers).length === 0) throw new Error('В тексте не найдено ни тегов, ни ходов');
-  return { headers, result: parsed.result ?? headers.Result ?? null, rootState, tree };
+  return { headers, result: parsed.result ?? headers.Result ?? null, rootState, tree, skipped };
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
-/** Дата в формате PDN YYYY.MM.DD (§3 Date). */
 export function formatDate(date = new Date()) {
   return `${date.getFullYear()}.${pad2(date.getMonth() + 1)}.${pad2(date.getDate())}`;
 }
 
-/** Авто-результат по конечной позиции магистрали. */
 export function detectResult(history) {
   let node = history.root;
   while (node.children.length) node = node.children[0];
@@ -166,13 +239,8 @@ export function detectResult(history) {
   return '1/2-1/2';
 }
 
-/** Экранирование комментария для записи (PDN не допускает } внутри {…}). */
 const safeComment = (s) => String(s).replace(/[{}]/g, '').trim();
 
-/**
- * Генерирует PDN-текст по истории и тегам. Нумерация совпадает с отображением
- * и со стандартом; комментарии и вариации воспроизводятся на своих местах.
- */
 export function generatePDN(history, headers = {}) {
   const root = history.root;
   const result = headers.Result ?? detectResult(history);

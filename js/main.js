@@ -500,7 +500,14 @@ function loadPDNText(text) {
   for (const key of ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result', 'GameType']) if (parsed.headers[key]) gameHeaders[key] = parsed.headers[key];
   history.loadFromTree(parsed.rootState, parsed.tree);
   history.toEnd(); syncMetaPanel();
-  showToast(parsed.result ? `Партия загружена · результат ${parsed.result}` : 'Партия загружена');
+
+  const skipped = parsed.skipped || [];
+  if (skipped.length) {
+    const sample = skipped.slice(0, 5).map((s) => s.raw).join(', ');
+    showToast(`Загружено с предупреждением: пропущено недопустимых ходов: ${skipped.length} (${sample}${skipped.length > 5 ? ', …' : ''}) — проверьте файл`, 'error', 8000);
+  } else {
+    showToast(parsed.result ? `Партия загружена · результат ${parsed.result}` : 'Партия загружена');
+  }
 }
 function currentPDN() { return generatePDN(history, gameHeaders); }
 
