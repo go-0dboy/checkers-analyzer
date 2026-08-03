@@ -176,21 +176,35 @@ boardUI.on('dragdrop', ({ from, to }) => { if (mode === 'setup') return; handleD
 function handleSquareClick(sq) {
   const state = history.currentState;
   if (getGameStatus(state).over) return;
+
   if (pending) {
     const step = pending.nextSteps.find((s) => s.to === sq);
     if (step) { performJumpStep(step); return; }
     if (sq === pending.current) { renderPending(); return; }
+    // Пока прыжок ещё не сделан (стадия выбора шашки), разрешаем
+    // передумать и выбрать другую шашку с обязательным взятием.
+    if (pending.path.length === 1) {
+      const piece = state.board[sq];
+      if (piece && colorOf(piece) === state.turn) {
+        const pieceMoves = getMovesForPiece(state, sq);
+        if (pieceMoves.length && pieceMoves[0].isCapture) { startCaptureSequence(sq); return; }
+      }
+    }
     return;
   }
+
   if (selected !== null) {
+    if (sq === selected) { selected = null; activeHints = null; renderAnalyze(); return; }
     const moves = getMovesForPiece(state, selected).filter((m) => m.to === sq);
     if (moves.length) { commitMove(pickMove(moves)); return; }
   }
+
   const piece = state.board[sq];
   if (piece && colorOf(piece) === state.turn) {
     const pieceMoves = getMovesForPiece(state, sq);
     if (pieceMoves.length) { if (pieceMoves[0].isCapture) startCaptureSequence(sq); else selectQuiet(sq, pieceMoves); return; }
   }
+
   selected = null; activeHints = null; renderAnalyze();
 }
 
