@@ -1,25 +1,33 @@
 /**
  * @module history
  * Дерево ходов + навигация + рендер нотации в виде дерева ветвей.
- * children[0] — магистраль, children[1..] — вариации. Узел хранит комментарии
- * в двух фазах (commentsBefore/commentsAfter), чтобы round-trip сохранял их позицию.
- * Нумерация: номер пары один раз перед ходом белых; «N...» перед чёрным — только
- * когда последовательность стартует с чёрного хода.
+ *
+ * Модель: children[0] — магистраль (главная линия), children[1..] — вариации.
+ * Узел хранит комментарии в двух фазах (commentsBefore / commentsAfter),
+ * чтобы корректно воспроизводить PDN, где комментарий может стоять и до,
+ * и после хода (PDN 3.0, §4.3: «Comments … may appear anywhere»).
+ *
+ * Рендер нотации рисует вариации блоками с отступом и цветной вертикальной
+ * ветвью по глубине (узел-точка сверху, хвостик-окончание снизу) — структура
+ * читается как дерево коммитов, а не как плоский текст со скобками.
+ * Нумерация по стандарту: номер пары один раз перед ходом белых; «N...»
+ * перед чёрным ходом только когда последовательность стартует с чёрного.
  */
 
 import { initialState, makeMove, moveToString } from './engine.js';
 
 let NEXT_NID = 1;
 
+/** Узел дерева ходов. */
 export class HistoryNode {
   constructor(move, parent, state) {
     this.nid = NEXT_NID++;
-    this.move = move;
+    this.move = move;          // ход, ведущий в узел (null у корня)
     this.parent = parent;
-    this.state = state;
+    this.state = state;        // позиция ПОСЛЕ хода
     this.children = [];
-    this.commentsBefore = [];
-    this.commentsAfter = [];
+    this.commentsBefore = [];  // комментарии перед ходом
+    this.commentsAfter = [];   // комментарии после хода
   }
 }
 
@@ -29,12 +37,12 @@ export class GameHistory {
     this.root = new HistoryNode(null, null, state);
     this.current = this.root;
     this._byNid = new Map([[this.root.nid, this.root]]);
-    this.onChange = null;
-    this.onEditComment = null;
+    this.onChange = null;        // () => void — после любого изменения
+    this.onEditComment = null;   // ({ node, phase, index }) => void
 
     this.container?.addEventListener('click', (e) => {
       const cm = e.target.closest('.move-comment');
-      if (cm) {
+      if (cm) { // клик по комментарию — переход к ходу + редактирование
         const node = this._byNid.get(Number(cm.dataset.nid));
         if (node) {
           this.goToNode(node);
@@ -55,6 +63,7 @@ export class GameHistory {
   get canForward()   { return this.current.children.length > 0; }
   get isEmpty()      { return this.root.children.length === 0; }
 
+  /** Сброс дерева к новой корневой позиции. */
   reset(state) {
     this.root = new HistoryNode(null, null, state);
     this.current = this.root;
@@ -62,6 +71,7 @@ export class GameHistory {
     this._notify();
   }
 
+  /** Загрузка дерева из структуры парсера PDN (с комментариями). */
   loadFromTree(state, tree) {
     this.root = new HistoryNode(null, null, state);
     this._byNid = new Map([[this.root.nid, this.root]]);
@@ -80,6 +90,7 @@ export class GameHistory {
     this._notify();
   }
 
+  /** Добавляет ход от текущей позиции (переиспользует существующую ветвь). */
   addMove(move) {
     const key = moveToString(move);
     let child = this.current.children.find((c) => moveToString(c.move) === key);
@@ -111,8 +122,9 @@ export class GameHistory {
   }
 
   /**
-   * Удаляет текущий узел вместе со всем поддеревом (ход + всё после него в ветке).
-   * Текущей становится родительская позиция. Корень не удаляется.
+   * Удаляет текущий узел вместе со всем поддеревом (ход + всё после него
+   * в его ветке, включая вложенные вариации). Текущей становится родительская
+   * позиция (позиция до удалённого хода). Корень не удаляется.
    * @returns {boolean} true при успехе
    */
   deleteCurrent() {
@@ -128,12 +140,13 @@ export class GameHistory {
     this._notify();
     return true;
   }
-
+  
   _notify() {
     this.render();
     this.onChange?.({ node: this.current, state: this.current.state, lastMove: this.current.move });
   }
 
+  /** Перерисовывает контейнер нотации и прокручивает к активному ходу. */
   render() {
     if (!this.container) return;
     const frag = document.createDocumentFragment();
@@ -149,6 +162,7 @@ export class GameHistory {
     const active = this.container.querySelector(`.move[data-nid="${this.current.nid}"]`);
     if (active) {
       active.classList.add('active');
+      // прокручиваем ТОЛЬКО список (никогда не window — иначе страница уезжает)
       const cRect = this.container.getBoundingClientRect();
       const aRect = active.getBoundingClientRect();
       if (aRect.top < cRect.top) this.container.scrollTo({ top: this.container.scrollTop + (aRect.top - cRect.top) - 10, behavior: 'smooth' });
@@ -178,6 +192,7 @@ export class GameHistory {
     const arr = node[phase] || [];
     for (let i = 0; i < arr.length; i++) out.appendChild(this._commentSpan(arr[i], node, phase, i));
   }
+  /** Нужен ли номер: белым всегда; чёрным — только если это первый ход последовательности. */
   _needsNumber(ply, isFirst) { return ply % 2 === 0 || isFirst; }
 
   _renderContinuation(parent, ply, out, depth, isFirst) {

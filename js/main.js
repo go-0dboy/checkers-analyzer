@@ -1,7 +1,16 @@
 /**
  * @module main
- * Оркестратор: режимы analyze/setup, мутабельное состояние UI, синхронизация
- * панелей, маршрутизация меню/клавиатуры. Правил и отрисовки сам не содержит.
+ * Точка входа и оркестратор. Склеивает слои:
+ *   engine (правила) · board (отрисовка/ввод) · history (дерево/нотация) ·
+ *   pdn (чтение/запись) · storage (файлы/настройки) · themes/toast/export (UI-утилиты).
+ *
+ * main.js НЕ содержит правил и НЕ рисует сам — он держит режимы (analyze/setup),
+ * мутабельное состояние UI (выбор, подсказки, незавершённая серия взятий, теги),
+ * синхронизирует панели и маршрутизирует действия меню/клавиатуры.
+ *
+ * Режимы:
+ *   analyze — разбор партии: доска + плашки + нотация + афиша метаданных;
+ *   setup   — расстановка: доска-холст + палитра фигур + FEN-плашка + паспорт тегов.
  */
 
 import {
@@ -38,18 +47,20 @@ const boardUI = new BoardUI({
 
 const history = new GameHistory({ container: $('#movelist') });
 
-let mode = 'analyze';
-let selected = null;
-let activeHints = null;
-let pending = null;
-let gameHeaders = {};
-let pendingSave = null;
-let headersSnapshot = null;
+/* ── мутабельное состояние UI ────────────────────────────────────── */
+let mode = 'analyze';          // 'analyze' | 'setup'
+let selected = null;           // индекс выбранной фигуры (для тихих ходов)
+let activeHints = null;        // подсветки ходов выбранной фигуры
+let pending = null;            // незавершённая серия взятий (пошаговый ввод)
+let gameHeaders = {};          // теги PDN текущей партии
+let pendingSave = null;        // канал сохранения: 'file' | 'clip'
+let headersSnapshot = null;    // снимок тегов на входе в расстановку (для «Отмены»)
 
-let setupBoard = null;
-let setupTurn = WHITE;
-let activeTool = 'w';
+let setupBoard = null;         // доска-холст расстановки
+let setupTurn = WHITE;         // очередь хода в расстановке
+let activeTool = 'w';          // активный инструмент палитры
 
+/* ── утилиты ─────────────────────────────────────────────────────── */
 const plural = (n, [one, few, many]) => {
   const m10 = n % 10, m100 = n % 100;
   if (m10 === 1 && m100 !== 11) return one;
@@ -72,6 +83,7 @@ function lostPieces(rootState, state, color) {
   return { total, kings };
 }
 
+/* ── центральный цикл синхронизации ──────────────────────────────── */
 history.onChange = () => { selected = null; activeHints = null; pending = null; sync(); };
 
 function sync() {
@@ -95,17 +107,18 @@ function renderAnalyze(lastMove = history.lastMove) {
 
 function syncNav() {
   const inSetup = mode === 'setup';
-  const atRoot = history.current === history.root;
   $('#btn-start').disabled = inSetup || !history.canBack;
   $('#btn-prev').disabled  = inSetup || !history.canBack;
   $('#btn-next').disabled  = inSetup || !history.canForward;
   $('#btn-end').disabled   = inSetup || !history.canForward;
+  const atRoot = history.current === history.root;
   const cbtn = $('#btn-comment');
   if (cbtn) cbtn.disabled = inSetup || atRoot;
   const dbtn = $('#btn-delete-move');
   if (dbtn) dbtn.disabled = inSetup || atRoot;
 }
 
+/** Видимость панелей по режиму. */
 function applyModeVisibility() {
   const setup = mode === 'setup';
   $('#setup-panel').hidden      = !setup;
@@ -117,6 +130,7 @@ function applyModeVisibility() {
   $('#controls').hidden         = setup;
 }
 
+/* ── плашки игроков ──────────────────────────────────────────────── */
 function syncPlayerBars() {
   const inSetup = mode === 'setup';
   const state = inSetup ? { board: setupBoard, turn: setupTurn, plies: 0 } : history.currentState;
@@ -155,6 +169,7 @@ function configureBar(barEl, color, state, rootState, ctx) {
   }
 }
 
+/* ── ввод на доске ───────────────────────────────────────────────── */
 boardUI.on('squareclick', ({ sq }) => { if (mode === 'setup') { paintSetup(sq); return; } handleSquareClick(sq); });
 boardUI.on('dragdrop', ({ from, to }) => { if (mode === 'setup') return; handleDragDrop(from, to); });
 
@@ -192,6 +207,7 @@ function handleDragDrop(from, to) {
 
 function selectQuiet(sq, moves) { selected = sq; activeHints = moves.map((m) => ({ to: m.to, isCapture: false })); renderAnalyze(); }
 
+/** Старт пошаговой серии взятий: allowedMoves — серии, разрешённые локальным правилом. */
 function startCaptureSequence(sq) {
   const state = history.currentState;
   const series = getMovesForPiece(state, sq).filter((m) => m.isCapture);
@@ -200,6 +216,7 @@ function startCaptureSequence(sq) {
   selected = null; activeHints = null; renderPending();
 }
 
+/** Следующие посадки: берём «сырые» прыжки и оставляем согласованные с разрешёнными сериями. */
 function computeNextSteps() {
   const k = pending.path.length;
   const allowedTo = new Set();
@@ -243,6 +260,7 @@ function renderPending() {
   boardUI.render(display, { lastMove: last, selected: pending.current, hints: pending.nextSteps.map((s) => ({ to: s.to, isCapture: true })), movable: new Set([pending.current]) });
 }
 
+/* ── расстановка позиции ─────────────────────────────────────────── */
 function enterSetup() {
   mode = 'setup';
   setupBoard = history.currentState.board.slice();
@@ -256,6 +274,7 @@ function exitSetup() { mode = 'analyze'; boardUI.setSetupMode(false); sync(); sy
 function syncSetup() { renderSetupBoard(); renderSetupMetaPreview(); $('#board').classList.remove('game-over'); }
 function renderSetupBoard() { boardUI.render({ board: setupBoard, turn: setupTurn, plies: 0 }, {}); updateSetupFen(); }
 
+/** Живая FEN-плашка под палитрой фигур. */
 function updateSetupFen() {
   const el = $('#setup-fen-text');
   if (!el || !setupBoard) return;
@@ -265,8 +284,9 @@ function updateSetupFen() {
   if (bar) { bar.classList.add('bump'); clearTimeout(bar._bumpT); bar._bumpT = setTimeout(() => bar.classList.remove('bump'), 220); }
 }
 
+/** Покраска клетки холста. Простая на последней горизонтали → дамка (корректность). */
 function paintSetup(sq) {
-  if (!isDarkSquare(sq)) return;
+  if (!isDarkSquare(sq)) return; // светлые клетки недоступны
   let tool = activeTool;
   if (tool === 'w' && rankOf(sq) === SIZE - 1) tool = 'W';
   else if (tool === 'b' && rankOf(sq) === 0) tool = 'B';
@@ -301,6 +321,7 @@ $('#btn-setup-apply').addEventListener('click', () => {
   showToast(`Позиция применена — ход ${setupTurn === WHITE ? 'белых' : 'чёрных'}`);
 });
 
+/* ── паспорт тегов в расстановке ─────────────────────────────────── */
 const SAVE_FIELDS = [['event', 'Event'], ['site', 'Site'], ['white', 'White'], ['black', 'Black'], ['date', 'Date'], ['round', 'Round']];
 const smVal = (name) => $(`#sm-f-${name}`).value.trim();
 const setSmVal = (name, v) => { $(`#sm-f-${name}`).value = v ?? ''; };
@@ -339,6 +360,7 @@ function renderSetupMetaPreview() {
 });
 $('#sm-f-result')?.addEventListener('change', () => { collectSetupMetaFields(); renderSetupMetaPreview(); });
 
+/* ── афиша метаданных в анализе ──────────────────────────────────── */
 const META_ICONS = {
   event: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
   site:  '<path d="M12 21s-6-5.2-6-10a6 6 0 1 1 12 0c0 4.8-6 10-6 10Z"/><circle cx="12" cy="11" r="2.2"/>',
@@ -353,7 +375,7 @@ function parseResult(r) {
   if (r === '1-0' || r === '2-0') return { white: true, black: false, draw: false, live: false };
   if (r === '0-1' || r === '0-2') return { white: false, black: true, draw: false, live: false };
   if (r === '1/2-1/2' || r === '1-1') return { white: false, black: false, draw: true, live: false };
-  return { white: false, black: false, draw: false, live: false };
+  return { white: false, black: false, draw: false, live: true };
 }
 function syncMetaPanel() {
   const body = $('#meta-body'); if (!body) return;
@@ -389,6 +411,7 @@ function syncMetaPanel() {
   body.innerHTML = html;
 }
 
+/* ── модалки: загрузка PDN / редактор тегов / комментарий ────────── */
 const modal = $('#pdn-modal'), pdnText = $('#pdn-text');
 function openPasteModal(prefill = '') {
   $('#pdn-modal-title').textContent = 'Загрузка PDN';
@@ -484,12 +507,14 @@ $('#btn-delete-move').addEventListener('click', () => {
   if (history.deleteCurrent()) showToast(extra > 0 ? 'Ход и продолжение ветки удалены' : 'Ход удалён');
 });
 
+/* ── загрузка/сохранение PDN ─────────────────────────────────────── */
 function loadPDNText(text) {
   const parsed = parsePDN(text);
   gameHeaders = {};
   for (const key of ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result', 'GameType']) if (parsed.headers[key]) gameHeaders[key] = parsed.headers[key];
   history.loadFromTree(parsed.rootState, parsed.tree);
   history.toEnd(); syncMetaPanel();
+
   const skipped = parsed.skipped || [];
   if (skipped.length) {
     const sample = skipped.slice(0, 5).map((s) => s.raw).join(', ');
@@ -498,8 +523,10 @@ function loadPDNText(text) {
     showToast(parsed.result ? `Партия загружена · результат ${parsed.result}` : 'Партия загружена');
   }
 }
+
 function currentPDN() { return generatePDN(history, gameHeaders); }
 
+/* ── меню и команды ──────────────────────────────────────────────── */
 function closeAllSubmenus() { document.querySelectorAll('.menu-group.open').forEach((g) => g.classList.remove('open')); }
 function closeDrawer() { $('#main-menu').classList.remove('open'); $('#menu-toggle').classList.remove('open'); $('#menu-toggle').setAttribute('aria-expanded', 'false'); }
 
@@ -564,7 +591,6 @@ $('#btn-new').addEventListener('click', () => { if (!history.isEmpty && !confirm
 
 window.addEventListener('keydown', (e) => {
   if (!modal.hidden || !saveModal.hidden || !commentModal.hidden) { if (e.key === 'Escape') { closeModal(); closeSaveModal(); closeCommentModal(); } return; }
-  if (e.key === 'Escape') { closeThemeMenu(); closeBoardMenu(); return; }
   if (e.target.closest('textarea, input')) return;
   switch (e.key) {
     case 'ArrowLeft':  e.preventDefault(); history.back();    break;
@@ -575,19 +601,18 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+/* ── запуск ──────────────────────────────────────────────────────── */
 (function boot() {
   let prefs = loadPrefs();
-  if (prefs.orientFix !== 3) prefs = savePrefs({ flipped: false, orientFix: 3 });
+  if (prefs.orientFix !== 3) prefs = savePrefs({ flipped: false, orientFix: 3 }); // одноразовая миграция ориентации
   if (THEME_IDS.includes(prefs.theme)) document.documentElement.dataset.theme = prefs.theme;
   document.documentElement.dataset.board = BOARD_IDS.includes(prefs.board) ? prefs.board : 'classic';
   if (prefs.flipped) boardUI.setFlipped(true, false);
-  bindThemePickers();
+
+  bindThemePickers();   // обработчики пикеров темы/скина
   setCaptureSep(':');
   sync();
   syncMetaPanel();
   updateThemeMenu();
   updateBoardMenu();
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });
-  }
 })();
