@@ -182,13 +182,6 @@
             <path d="M4.5 9a8 8 0 0 1 13.7-3.1L20.5 8M20.5 3.5V8H16M19.5 15a8 8 0 0 1-13.7 3.1L3.5 16M3.5 20.5V16H8"/>
           </svg>
         </button>
-        <span class="ctrl-sep" aria-hidden="true"></span>
-        <button id="btn-comment" class="ctrl-btn" title="Комментарий к ходу" aria-label="Комментарий к ходу">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M7 8h7M7 12h5"/>
-            <path d="M21 12a8 8 0 0 1-11.3 7.3L4 21l1.7-5.7A8 8 0 1 1 21 12Z"/>
-          </svg>
-        </button>
       </div>
 
       <!-- Панель расстановки позиции (видна только в режиме setup) -->
@@ -295,6 +288,20 @@
           <h2>Нотация</h2>
           <span class="panel-hint">клик по ходу — переход по позиции</span>
         </header>
+        <div class="notation-toolbar" role="toolbar" aria-label="Действия с ходом">
+          <button id="btn-comme"nt" class="nt-btn" title="Комментарий к ходу" aria-label="Комментарий к ходу">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 8h7M7 12h5" />
+              <path d="M21 12a8 8 0 0 1-11.3 7.3L4 21l1.7-5.7A8 8 0 1 1 21 12Z" />
+            </svg>
+          </button>
+          <button id="btn-delete-move" class="nt-btn danger" title="Удалить ход и всё продолжение ветки" aria-label="Удалить ход">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </div>
+
         <div class="movelist" id="movelist" tabindex="0" aria-label="Дерево ходов"></div>
       </section>
     </aside>

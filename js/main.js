@@ -110,9 +110,13 @@ function syncNav() {
   $('#btn-start').disabled = inSetup || !history.canBack;
   $('#btn-prev').disabled  = inSetup || !history.canBack;
   $('#btn-next').disabled  = inSetup || !history.canForward;
-  $('#btn-end').disabled   = inSetup || !history.canForward;
+  $('#btn-end').disabled   = inSetup || !history.canForward
+  
+  const atRoot = history.current === history.root;
   const cbtn = $('#btn-comment');
-  if (cbtn) cbtn.disabled = inSetup || history.current === history.root;
+  if (cbtn) cbtn.disabled = inSetup || atRoot;
+  const dbtn = $('#btn-delete-move');
+  if (dbtn) dbtn.disabled = inSetup || atRoot;
 }
 
 /** Видимость панелей по режиму. */
@@ -492,6 +496,9 @@ commentModal.addEventListener('click', (e) => { if (e.target === commentModal ||
 $('#comment-apply').addEventListener('click', applyComment);
 $('#comment-delete').addEventListener('click', deleteComment);
 $('#btn-comment').addEventListener('click', () => { if (history.current === history.root) return; openCommentModal(history.current, 'after', null); });
+$('#btn-delete-move').addEventListener('click', () => {
+  if (history.current === history.root) return;
+  if (history.deleteCurrent()) showToast('Ход и продолжение ветки удалены');});
 
 /* ── загрузка/сохранение PDN ─────────────────────────────────────── */
 function loadPDNText(text) {

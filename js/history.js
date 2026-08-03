@@ -112,7 +112,28 @@ export class GameHistory {
     while (node.children.length) node = node.children[0];
     if (node !== this.current) { this.current = node; this._notify(); }
   }
+  
   goToNode(node) { if (node && node !== this.current) { this.current = node; this._notify(); } }
+  
+    /**
+     * Удаляет текущий узел вместе со всем поддеревом — то есть ход и всё,
+     * что идёт после него внутри его ветки (включая вложенные вариации).
+     * Текущей становится родительская позиция (позиция до удалённого хода).
+     * @returns {boolean} true при успехе (корень не удаляется)
+     */
+    deleteCurrent() {
+      const node = this.current;
+      if (!node || !node.parent) return false;
+      const parent = node.parent;
+      const i = parent.children.indexOf(node);
+      if (i === -1) return false;
+      parent.children.splice(i, 1);
+      const purge = (n) => { this._byNid.delete(n.nid); n.children.forEach(purge); };
+      purge(node);
+      this.current = parent;
+      this._notify();
+      return true;
+    }
 
   _notify() {
     this.render();
