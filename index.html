@@ -4,18 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Русские шашки — анализатор партий</title>
-  <meta name="description" content="Анализатор партий в русские шашки: дерево ходов с вариациями и комментариями, PDN 3.0, расстановка позиций, экспорт в SVG, темы и скины доски.">
+  <meta name="description" content="Анализатор партий в русские шашки: дерево ходов, PDN 3.0, расстановка позиций, экспорт SVG.">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#171009">
-  <!-- Open Graph: превью при шаринге ссылки на репозиторий/страницу -->
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="Русские шашки — анализатор партий">
-  <meta property="og:description" content="Дерево ходов, PDN 3.0, расстановка позиций, экспорт SVG, темы и скины. Чистый JS, без зависимостей.">
-
   <link rel="manifest" href="./manifest.webmanifest">
-  <meta name="theme-color" content="#171009">
   <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
-  <link rel="apple-touch-icon" href="./icons/icon-512.png">
+  <link rel="apple-touch-icon" href="./icons/icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Шашки">
@@ -74,7 +68,6 @@
     </nav>
 
     <div class="topbar-actions">
-      <!-- Пикер скина доски и фигур (модуль themes.js) -->
       <div class="board-picker">
         <button id="board-toggle" class="icon-btn" aria-haspopup="true" aria-expanded="false"
                 title="Вид доски и фигур" aria-label="Вид доски и фигур">
@@ -96,7 +89,6 @@
         </div>
       </div>
 
-      <!-- Пикер цветовой темы (модуль themes.js) -->
       <div class="theme-picker">
         <button id="theme-toggle" class="icon-btn" aria-haspopup="true" aria-expanded="false"
                 title="Тема оформления" aria-label="Тема оформления">
@@ -125,7 +117,6 @@
 
     <section class="board-zone" aria-label="Игровая доска">
 
-      <!-- Плашка игрока: индикатор хода, счёт фигур, бейджи результата/взятия -->
       <div class="player-bar" id="player-top">
         <span class="player-disc disc-black" aria-hidden="true"></span>
         <span class="player-name">Чёрные</span>
@@ -154,7 +145,6 @@
         <span class="captured-tray" id="captured-bottom" aria-label="Съеденные шашки белых"></span>
       </div>
 
-      <!-- Панель навигации и действий над партией -->
       <div class="controls" id="controls" role="toolbar" aria-label="Управление партией">
         <button id="btn-new" class="ctrl-btn ctrl-new" title="Новая партия" aria-label="Новая партия">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -184,7 +174,6 @@
         </button>
       </div>
 
-      <!-- Панель расстановки позиции (видна только в режиме setup) -->
       <section class="setup-panel" id="setup-panel" hidden>
         <div class="setup-bar">
           <div class="setup-tools">
@@ -236,7 +225,6 @@
     </section>
 
     <aside class="side-panel">
-      <!-- Паспорт тегов PDN в режиме расстановки -->
       <section class="panel setup-meta-panel" id="setup-meta-panel" hidden>
         <header class="panel-head">
           <h2>
@@ -273,7 +261,6 @@
         </div>
       </section>
 
-      <!-- Афиша метаданных партии в режиме анализа -->
       <section class="panel meta-panel" id="meta-panel">
         <header class="panel-head">
           <h2>Партия</h2>
@@ -282,32 +269,29 @@
         <div class="meta-body" id="meta-body"></div>
       </section>
 
-      <!-- Дерево нотации -->
       <section class="panel notation-panel" id="notation-panel">
         <header class="panel-head">
           <h2>Нотация</h2>
           <span class="panel-hint">клик по ходу — переход по позиции</span>
         </header>
         <div class="notation-toolbar" role="toolbar" aria-label="Действия с ходом">
-          <button id="btn-comme"nt" class="nt-btn" title="Комментарий к ходу" aria-label="Комментарий к ходу">
+          <button id="btn-comment" class="nt-btn" title="Комментарий к ходу" aria-label="Комментарий к ходу">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M7 8h7M7 12h5" />
-              <path d="M21 12a8 8 0 0 1-11.3 7.3L4 21l1.7-5.7A8 8 0 1 1 21 12Z" />
+              <path d="M7 8h7M7 12h5"/>
+              <path d="M21 12a8 8 0 0 1-11.3 7.3L4 21l1.7-5.7A8 8 0 1 1 21 12Z"/>
             </svg>
           </button>
           <button id="btn-delete-move" class="nt-btn danger" title="Удалить ход и всё продолжение ветки" aria-label="Удалить ход">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6" />
+              <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6"/>
             </svg>
           </button>
         </div>
-
         <div class="movelist" id="movelist" tabindex="0" aria-label="Дерево ходов"></div>
       </section>
     </aside>
   </main>
 
-  <!-- Модалка загрузки PDN -->
   <div class="modal-backdrop" id="pdn-modal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pdn-modal-title">
       <header class="modal-head">
@@ -322,7 +306,6 @@
     </div>
   </div>
 
-  <!-- Модалка редактора тегов перед сохранением -->
   <div class="modal-backdrop" id="save-modal" hidden>
     <div class="modal save-modal" role="dialog" aria-modal="true" aria-labelledby="save-title">
       <header class="modal-head">
@@ -361,7 +344,6 @@
     </div>
   </div>
 
-  <!-- Модалка комментария к ходу -->
   <div class="modal-backdrop" id="comment-modal" hidden>
     <div class="modal comment-modal" role="dialog" aria-modal="true" aria-labelledby="comment-title">
       <header class="modal-head">
