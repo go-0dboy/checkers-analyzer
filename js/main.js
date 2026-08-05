@@ -148,23 +148,32 @@ const SIDE_FOR = {
   'library-panel': 'library',
 };
 
-/** Раскладывает боковые панели по колонкам и сортирует внутри по порядку СВОЕГО режима. */
+/** Раскладывает боковые панели по колонкам; трогает DOM только при реальном изменении. */
 function applyLayout() {
   const left = $('#side-left'), right = $('#side-right');
   if (!left || !right) return;
   const sides = getSidePrefs();
   const order = getOrderPrefs();
   const orderVal = (key) => (key === 'setupTags' ? order.setup[key] : order.analyze[key]) ?? 0;
+
   const buckets = { left: [], right: [] };
   for (const [id, key] of Object.entries(SIDE_FOR)) {
     const el = document.getElementById(id);
     if (!el) continue;
     buckets[sides[key] === 'left' ? 'left' : 'right'].push({ el, key });
   }
+
   for (const col of [left, right]) {
-    const list = (col === left ? buckets.left : buckets.right)
-      .sort((a, b) => orderVal(a.key) - orderVal(b.key));
-    for (const { el } of list) col.appendChild(el);
+    const want = (col === left ? buckets.left : buckets.right)
+      .sort((a, b) => orderVal(a.key) - orderVal(b.key))
+      .map((x) => x.el);
+
+    // текущий порядок участвующих панелей в этой колонке
+    const cur = [...col.children].filter((el) => want.includes(el));
+    const same = cur.length === want.length && cur.every((el, i) => el === want[i]);
+    if (same) continue;   // порядок не изменился — DOM не трогаем, мигания нет
+
+    for (const el of want) col.appendChild(el);
   }
 }
 
