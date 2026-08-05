@@ -1,11 +1,11 @@
 /**
  * @module library
- * База партий (data/games.json) + использование в анализе + админ-инструмент.
- * Хранение: файл в проекте + черновик в localStorage. Импорт только линейных
- * сыгранных партий (без комментариев/ветвлений). Поиск по FEN текущей позиции.
- * НОВОЕ: клик по ходу в «Библиотеке» = сыграть его на доске.
+ * База партий (data/games.json) + панель «Библиотека» в анализе + админ-инструмент.
+ * Поиск по FEN текущей позиции; выводятся ВСЕ найденные группы ходов.
+ * Клик по ходу = сыграть его; справа у группы — знак «?», по клику всплывающая
+ * подсказка с тегами PDN representative-партии (как в панели «Партия»).
  */
-import { WHITE, BLACK, stateToFEN, getLegalMoves, nameToIdx } from './engine.js';
+import { nameToIdx, getLegalMoves, stateToFEN } from './engine.js';
 import { parsePDNBatch } from './pdn.js';
 import { downloadText } from './storage.js';
 import { showToast } from './toast.js';
@@ -14,12 +14,21 @@ const DB_URL = 'data/games.json';
 const DRAFT_KEY = 'ru-checkers-analyzer:db-draft';
 const ADMIN_KEY = 'ru-checkers-analyzer:admin';
 
-const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const year = (d) => String(d || '').slice(0, 4);
-
 let games = [], fileGames = [], index = new Map();
 let adminMode = false, winsOnly = true, historyRef = null;
+let currentList = [];   // representative-партия для каждой отрисованной группы
+let tipEl = null;
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const real = (v) => typeof v === 'string' && v.trim() !== '' && v.trim() !== '?';
+
+function classify(side, result) {
+  const w = result === '1-0' || result === '2-0';
+  const b = result === '0-1' || result === '0-2';
+  if (result === '1/2-1/2' || result === '1-1' || result === '0-0') return 'd';
+  return ((side === 'w' && w) || (side === 'b' && b)) ? 'w' : 'l';
+}
+const orderRes = (side, r) => ({ w: 0, d: 1, l: 2 }[classify(side, r)]);
 
 export function initLibraryUI({ history }) {
   historyRef = history;
@@ -29,17 +38,33 @@ export function initLibraryUI({ history }) {
     if (q.get('admin') === '0') localStorage.removeItem(ADMIN_KEY);
     adminMode = localStorage.getItem(ADMIN_KEY) === '1';
   } catch { adminMode = false; }
-  if (adminMode) $('#menu-db')?.removeAttribute('hidden');
+  if (adminMode) document.getElementById('menu-db')?.removeAttribute('hidden');
 
   wireAdmin();
-  $('#lib-filter')?.addEventListener('change', (e) => { winsOnly = e.target.checked; renderLibrary(); });
+  document.getElementById('lib-filter')?.addEventListener('change', (e) => { winsOnly = e.target.checked; renderLibrary(); });
 
-  // Клик по ходу в библиотеке = сыграть его на доске.
-  $('#library-body')?.addEventListener('click', (e) => {
-    const el = e.target.closest('.lib-move');
-    if (!el) return;
-    playLibraryMove((el.dataset.move || el.textContent).trim());
+  const body = document.getElementById('library-body');
+  // клик по ходу = сыграть; клик по «?» = подсказка с тегами
+  body?.addEventListener('click', (e) => {
+    const h = e.target.closest('.open-help');
+    if (h) {
+      e.stopPropagation();
+      const i = Number(h.dataset.i);
+      const g = currentList[i];
+      if (!g) return;
+      if (tipEl && !tipEl.hidden && tipEl.dataset.for === 'L' + i) { hideTip(); return; }
+      showTip(h, gameMetaHTML(g), 'L' + i);
+      return;
+    }
+    const mv = e.target.closest('.lib-move');
+    if (mv) playLibraryMove((mv.dataset.move || mv.textContent).trim());
   });
+  body?.addEventListener('scroll', hideTip, { passive: true });
+
+  // глобальные закрытия подсказки
+  document.addEventListener('click', (e) => { if (tipEl && !tipEl.hidden && !e.target.closest('.open-help')) hideTip(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTip(); });
+  window.addEventListener('resize', hideTip);
 
   loadDB().then(() => {
     if (adminMode) renderAdmin();
@@ -48,35 +73,12 @@ export function initLibraryUI({ history }) {
   });
 }
 
-/** Разбирает строку хода и проводит его через историю (как обычный ход). */
-function playLibraryMove(moveStr) {
-  if (!historyRef || !moveStr) return;
-  const state = historyRef.currentState;
-  const squares = moveStr.toLowerCase().split(/[x:×-]/);
-  if (squares.length < 2) return;
-  const from = nameToIdx(squares[0]);
-  const to = nameToIdx(squares[squares.length - 1]);
-  const path = squares.map(nameToIdx);
-  const candidates = getLegalMoves(state).filter((m) => m.from === from && m.to === to);
-  if (!candidates.length) { showToast('Этот ход недоступен в текущей позиции', 'error'); return; }
-  const move = candidates.find((m) => m.path.length === path.length && m.path.every((s, i) => s === path[i])) || candidates[0];
-  historyRef.addMove(move); // триггерит onChange → sync → доска/нотация/плашки
-}
-
-function classify(side, result) {
-  const w = result === '1-0' || result === '2-0';
-  const b = result === '0-1' || result === '0-2';
-  if (result === '1/2-1/2' || result === '1-1' || result === '0-0') return 'd';
-  return ((side === WHITE && w) || (side === BLACK && b)) ? 'w' : 'l';
-}
-const orderRes = (side, r) => ({ w: 0, d: 1, l: 2 }[classify(side, r)]);
-
 async function loadDB() {
   let base = [];
   try {
     const r = await fetch(DB_URL, { cache: 'no-store' });
     if (r.ok) base = (await r.json()).games || [];
-  } catch { /* файла может не быть */ }
+  } catch { base = []; }
   fileGames = base;
   let draft = null;
   try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { }
@@ -90,13 +92,46 @@ function buildIndex() {
     const a = index.get(p.fen) || []; a.push({ g: gi, p: pi }); index.set(p.fen, a);
   }));
 }
-const saveDraft = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ games })); } catch { } };
+
+/** Подсказка с тегами PDN партии — в стиле панели «Партия». */
+function gameMetaHTML(g) {
+  const pr = { white: false, black: false, draw: false };
+  if (g.result === '1-0' || g.result === '2-0') pr.white = true;
+  else if (g.result === '0-1' || g.result === '0-2') pr.black = true;
+  else if (g.result === '1/2-1/2' || g.result === '1-1') pr.draw = true;
+  let html = `<div class="meta-match"><div class="meta-players">
+    <div class="meta-player${pr.white ? ' win' : pr.black ? ' lose' : ''}"><span class="meta-disc disc-white"></span><span class="pname">${esc(g.white)}</span></div>
+    <div class="meta-player${pr.black ? ' win' : pr.white ? ' lose' : ''}"><span class="meta-disc disc-black"></span><span class="pname">${esc(g.black)}</span></div>
+  </div><span class="meta-score${pr.draw ? ' draw' : ''}">${esc(g.result || '*')}</span></div>`;
+  const chips = [];
+  if (real(g.event)) chips.push(g.event);
+  if (real(g.site)) chips.push(g.site);
+  if (real(g.date)) chips.push(g.date);
+  if (real(g.round)) chips.push('Тур ' + g.round);
+  if (chips.length) html += `<div class="meta-tags">${chips.map((v) => `<span class="meta-chip"><span class="chip-val">${esc(v)}</span></span>`).join('')}</div>`;
+  return html;
+}
 
 function renderLibrary() {
-  const body = $('#library-body'); if (!body || !historyRef) return;
-  const st = historyRef.currentState, fen = stateToFEN(st), side = st.turn;
+  const body = document.getElementById('library-body');
+  const cnt = document.getElementById('library-count');
+  if (!body) return;
+  hideTip();
+
+  const played = [];
+  let n = historyRef.current;
+  while (n && n.move) { played.unshift(n.move); n = n.parent; }
+
+  currentList = [];
+  if (!played.length) {
+    if (cnt) cnt.textContent = '0';
+    body.innerHTML = '<div class="lib-empty">Сделайте ход — покажу ходы из базы</div>';
+    return;
+  }
+
+  const fen = stateToFEN(historyRef.currentState);
+  const side = historyRef.currentState.turn;
   let rows = (index.get(fen) || []).map((e) => ({ g: games[e.g], p: e.p }));
-  const cnt = $('#library-count'); if (cnt) cnt.textContent = String(rows.length);
   if (winsOnly) rows = rows.filter((r) => classify(side, r.g.result) === 'w');
 
   const groups = new Map();
@@ -108,24 +143,80 @@ function renderLibrary() {
     g.rows.push(r); groups.set(mv, g);
   }
   const arr = [...groups.values()].sort((a, b) => (b.w - a.w) || (b.rows.length - a.rows.length));
+
+  if (cnt) cnt.textContent = String(arr.length);
   if (!arr.length) {
-    body.innerHTML = `<div class="lib-empty">В базе нет ходов из этой позиции${winsOnly ? ' (фильтр: только победы текущего цвета)' : ''}</div>`;
+    body.innerHTML = '<div class="lib-empty">В базе нет ходов из этой позиции</div>';
     return;
   }
-  let html = '';
-  for (const g of arr) {
+
+  body.innerHTML = arr.map((g, i) => {
     const best = g.rows.slice().sort((a, b) => orderRes(side, a.g.result) - orderRes(side, b.g.result))[0];
-    const cont = best.g.plies.slice(best.p, best.p + 8).map((x) => x.m).join(' ');
-    html += `<div class="lib-group">
-      <div class="lib-head"><span class="lib-move" data-move="${esc(g.mv)}" title="Сыграть этот ход">${esc(g.mv)}</span><span class="lib-stat">${g.rows.length} · ${g.w}–${g.d}–${g.l}</span></div>
-      <div class="lib-line">${esc(cont)}</div>
-      <div class="lib-meta">${esc(best.g.white)} — ${esc(best.g.black)} · ${esc(best.g.event)} ${esc(year(best.g.date))} · ${esc(best.g.result)}</div>
+    currentList[i] = best.g;
+    const seqHtml = best.g.plies.slice(best.p, best.p + 8)
+      .map((x, idx) => `<span class="open-mv${idx < played.length ? ' played' : ''}">${esc(x.m)}</span>`).join(' ');
+    return `<div class="lib-group">
+      <div class="lib-head">
+        <span class="lib-move" data-move="${esc(g.mv)}" title="Сыграть этот ход">${esc(g.mv)}</span>
+        <span class="lib-head-right">
+          <span class="lib-stat">${g.rows.length} · ${g.w}–${g.d}–${g.l}</span>
+          <button class="open-help" data-i="${i}" title="Данные партии" aria-label="Данные партии">?</button>
+        </span>
+      </div>
+      <div class="open-line">${seqHtml}</div>
     </div>`;
+  }).join('');
+}
+
+/** Разбирает строку хода и проводит его через историю. */
+function playLibraryMove(moveStr) {
+  if (!historyRef || !moveStr) return;
+  const state = historyRef.currentState;
+  const squares = moveStr.toLowerCase().split(/[x:×-]/);
+  if (squares.length < 2) return;
+  const from = nameToIdx(squares[0]);
+  const to = nameToIdx(squares[squares.length - 1]);
+  const path = squares.map(nameToIdx);
+  const candidates = getLegalMoves(state).filter((m) => m.from === from && m.to === to);
+  if (!candidates.length) { showToast('Этот ход недоступен в текущей позиции', 'error'); return; }
+  const move = candidates.find((m) => m.path.length === path.length && m.path.every((s, i) => s === path[i])) || candidates[0];
+  historyRef.addMove(move);
+}
+
+/* ── всплывающая подсказка ── */
+function ensureTip() {
+  if (!tipEl) {
+    tipEl = document.createElement('div');
+    tipEl.id = 'lib-tip';
+    tipEl.className = 'open-tip';
+    tipEl.hidden = true;
+    document.body.appendChild(tipEl);
+    tipEl.addEventListener('click', (e) => e.stopPropagation());
   }
-  body.innerHTML = html;
+  return tipEl;
+}
+function hideTip() { if (tipEl) tipEl.hidden = true; }
+function showTip(btn, html, key) {
+  const tip = ensureTip();
+  tip.innerHTML = html;
+  tip.dataset.for = key;
+  tip.hidden = false;
+  const r = btn.getBoundingClientRect();
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = r.left - tw - 10;
+  if (left < 8) left = Math.max(8, Math.min(r.left, window.innerWidth - tw - 8));
+  let top = r.top - 4;
+  if (top + th > window.innerHeight - 8) top = window.innerHeight - th - 8;
+  if (top < 8) top = 8;
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
 }
 
 /* ── админ: наполнение базы ── */
+function moveStr(n) {
+  const sep = n.move.isCapture ? ':' : '-';
+  return n.move.path.map((i) => 'abcdefgh'[i % 8] + (Math.floor(i / 8) + 1)).join(sep);
+}
 function validateAndAddBatch(text) {
   const parsed = parsePDNBatch(text);
   let added = 0, skipped = 0; const errors = [];
@@ -147,36 +238,32 @@ function validateAndAddBatch(text) {
   else if (added) showToast(`Загружено: ${added}, пропущено: ${skipped}`, 'error', 5000);
   else showToast(`Пропущено партий: ${skipped}. ${errors.slice(0, 2).join('; ')}`, 'error', 6000);
 }
-// строка хода узла с разделителем ':' (русские) — согласовано с moveToString
-function moveStr(n) {
-  const sep = n.move.isCapture ? ':' : '-';
-  return n.move.path.map((i) => 'abcdefgh'[i % 8] + (Math.floor(i / 8) + 1)).join(sep);
-}
+const saveDraft = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ games })); } catch { } };
 
 function renderAdmin() {
-  const c = $('#db-count'); if (c) c.textContent = String(games.length);
-  const list = $('#db-list'); if (!list) return;
+  const c = document.getElementById('db-count'); if (c) c.textContent = String(games.length);
+  const list = document.getElementById('db-list'); if (!list) return;
   if (!games.length) { list.innerHTML = '<div class="lib-empty">База пуста</div>'; return; }
   list.innerHTML = games.map((g) =>
-    `<div class="db-row"><span class="db-name">${esc(g.white)} — ${esc(g.black)} · ${esc(g.event)} ${esc(year(g.date))} · ${esc(g.result)}</span><button class="db-del" data-del="${g.id}" title="Удалить">✕</button></div>`).join('');
+    `<div class="db-row"><span class="db-name">${esc(g.white)} — ${esc(g.black)} · ${esc(g.event)} ${esc(String(g.date).slice(0, 4))} · ${esc(g.result)}</span><button class="db-del" data-del="${g.id}" title="Удалить">✕</button></div>`).join('');
 }
 
 function wireAdmin() {
-  $('#menu-db')?.addEventListener('click', () => { $('#db-modal').hidden = false; renderAdmin(); });
-  $('#db-modal')?.addEventListener('click', (e) => { if (e.target.id === 'db-modal' || e.target.closest('[data-close]')) $('#db-modal').hidden = true; });
-  $('#db-add-file')?.addEventListener('click', () => $('#db-file-input').click());
-  $('#db-file-input')?.addEventListener('change', async (e) => {
+  document.getElementById('menu-db')?.addEventListener('click', () => { document.getElementById('db-modal').hidden = false; renderAdmin(); });
+  document.getElementById('db-modal')?.addEventListener('click', (e) => { if (e.target.id === 'db-modal' || e.target.closest('[data-close]')) document.getElementById('db-modal').hidden = true; });
+  document.getElementById('db-add-file')?.addEventListener('click', () => document.getElementById('db-file-input').click());
+  document.getElementById('db-file-input')?.addEventListener('change', async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
     try { validateAndAddBatch(await f.text()); } catch (err) { showToast(err.message, 'error', 4200); }
     e.target.value = '';
   });
-  $('#db-add-text')?.addEventListener('click', () => {
-    const t = $('#db-paste').value;
-    try { validateAndAddBatch(t); $('#db-paste').value = ''; } catch (err) { showToast(err.message, 'error', 4200); }
+  document.getElementById('db-add-text')?.addEventListener('click', () => {
+    const t = document.getElementById('db-paste').value;
+    try { validateAndAddBatch(t); document.getElementById('db-paste').value = ''; } catch (err) { showToast(err.message, 'error', 4200); }
   });
-  $('#db-export')?.addEventListener('click', () => { downloadText('games.json', JSON.stringify({ version: 1, games }, null, 1), 'application/json'); showToast('games.json выгружен — положите его в data/'); });
-  $('#db-reset')?.addEventListener('click', () => { try { localStorage.removeItem(DRAFT_KEY); } catch { } games = fileGames.slice(); buildIndex(); renderAdmin(); renderLibrary(); showToast('Черновик сброшен к файлу'); });
-  $('#db-list')?.addEventListener('click', (e) => {
+  document.getElementById('db-export')?.addEventListener('click', () => { downloadText('games.json', JSON.stringify({ version: 1, games }, null, 1), 'application/json'); showToast('games.json выгружен — положите его в data/'); });
+  document.getElementById('db-reset')?.addEventListener('click', () => { try { localStorage.removeItem(DRAFT_KEY); } catch { } games = fileGames.slice(); buildIndex(); renderAdmin(); renderLibrary(); showToast('Черновик сброшен к файлу'); });
+  document.getElementById('db-list')?.addEventListener('click', (e) => {
     const d = e.target.closest('[data-del]'); if (!d) return;
     games = games.filter((g) => g.id !== Number(d.dataset.del));
     buildIndex(); saveDraft(); renderAdmin(); renderLibrary();

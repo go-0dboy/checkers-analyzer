@@ -648,3 +648,17 @@ body.is-dragging * { cursor: grabbing !important; }
 
 /* ── разделитель групп (правые/левые) в настройках ── */
 .set-divider { height: 1px; background: var(--line); margin: .55rem 0; }
+
+/* ── библиотека: правый блок заголовка и тултип с тегами ── */
+.lib-head-right { display: inline-flex; align-items: center; gap: .4rem; flex: none; }
+.open-help { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); color: var(--text-faint); font: 700 .68rem/1 var(--font-mono); cursor: pointer; transition: all .14s ease; }
+.open-help:hover { color: var(--accent-2); border-color: var(--accent); transform: scale(1.1); }
+.open-tip { position: fixed; z-index: 200; max-width: min(340px, calc(100vw - 16px)); max-height: min(46vh, 420px); overflow-y: auto; background: var(--panel-2); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 14px 34px var(--shadow); padding: .7rem .85rem; font-size: .78rem; line-height: 1.55; color: var(--text); scrollbar-width: thin; scrollbar-color: var(--line) transparent; animation: tipIn .16s ease; }
+.open-tip::-webkit-scrollbar { width: 7px; }
+.open-tip::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+@keyframes tipIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* компактность мета-блоков внутри подсказки */
+.open-tip .meta-score { font-size: 1.05rem; }
+.open-tip .meta-player { padding: .12rem .2rem; }
+.open-tip .pname { font-size: .8rem; }
+.open-tip .meta-tags { margin-top: .45rem; }
