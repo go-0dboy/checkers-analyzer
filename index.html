@@ -18,6 +18,11 @@
 
   <link rel="stylesheet" href="style.css">
   <script type="module" src="js/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+    }
+  </script>
 </head>
 <body>
 
@@ -63,58 +68,23 @@
           <button role="menuitem" data-action="save-clip">В буфер обмена</button>
         </div>
       </div>
+      
+      <button class="menu-btn" id="menu-db" hidden>База партий</button>
+    
     </nav>
 
     <div class="topbar-actions">
-      <!-- Пикер скина доски и фигур (модуль themes.js) -->
-      <div class="board-picker">
-        <button id="board-toggle" class="icon-btn" aria-haspopup="true" aria-expanded="false"
-                title="Вид доски и фигур" aria-label="Вид доски и фигур">
-          <svg class="icon-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/>
-            <path d="M12 3.5v17M3.5 12h17"/>
-            <circle cx="7.75" cy="7.75" r="1.7" fill="currentColor" stroke="none"/>
-            <circle cx="16.25" cy="16.25" r="1.7" fill="currentColor" stroke="none"/>
-          </svg>
-        </button>
-        <div class="board-menu" id="board-menu" role="menu" aria-label="Выбор вида доски">
-          <button class="board-opt" data-board="classic"  role="menuitem"><span class="board-swatch"></span><span class="board-name">Классика</span><span class="board-check">✓</span></button>
-          <button class="board-opt" data-board="marble"   role="menuitem"><span class="board-swatch"></span><span class="board-name">Мрамор</span><span class="board-check">✓</span></button>
-          <button class="board-opt" data-board="green"    role="menuitem"><span class="board-swatch"></span><span class="board-name">Сукно</span><span class="board-check">✓</span></button>
-          <button class="board-opt" data-board="cherry"   role="menuitem"><span class="board-swatch"></span><span class="board-name">Вишня</span><span class="board-check">✓</span></button>
-          <button class="board-opt" data-board="ocean"    role="menuitem"><span class="board-swatch"></span><span class="board-name">Океан</span><span class="board-check">✓</span></button>
-          <button class="board-opt" data-board="graphite" role="menuitem"><span class="board-swatch"></span><span class="board-name">Графит</span><span class="board-check">✓</span></button>
-          <button class="board-opt" data-board="sand"     role="menuitem"><span class="board-swatch"></span><span class="board-name">Песок</span><span class="board-check">✓</span></button>
-        </div>
-      </div>
-
-      <!-- Пикер цветовой темы (модуль themes.js) -->
-      <div class="theme-picker">
-        <button id="theme-toggle" class="icon-btn" aria-haspopup="true" aria-expanded="false"
-                title="Тема оформления" aria-label="Тема оформления">
-          <svg class="icon-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="13.5" cy="6.5" r=".6" fill="currentColor" stroke="none"/>
-            <circle cx="17.5" cy="10.5" r=".6" fill="currentColor" stroke="none"/>
-            <circle cx="8.5" cy="7.5" r=".6" fill="currentColor" stroke="none"/>
-            <circle cx="6.5" cy="12.5" r=".6" fill="currentColor" stroke="none"/>
-            <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.83-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.66h2c3.05 0 5.55-2.5 5.55-5.56C21.97 6.01 17.46 2 12 2Z"/>
-          </svg>
-        </button>
-        <div class="theme-menu" id="theme-menu" role="menu" aria-label="Выбор темы">
-          <button class="theme-opt" data-theme="dark"     role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Орех</span><span class="theme-check">✓</span></button>
-          <button class="theme-opt" data-theme="light"    role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Пергамент</span><span class="theme-check">✓</span></button>
-          <button class="theme-opt" data-theme="forest"   role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Изумруд</span><span class="theme-check">✓</span></button>
-          <button class="theme-opt" data-theme="midnight" role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Полночь</span><span class="theme-check">✓</span></button>
-          <button class="theme-opt" data-theme="stone"    role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Камень</span><span class="theme-check">✓</span></button>
-          <button class="theme-opt" data-theme="wine"     role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Бордо</span><span class="theme-check">✓</span></button>
-          <button class="theme-opt" data-theme="teal"     role="menuitem"><span class="theme-swatch"></span><span class="theme-name">Океан</span><span class="theme-check">✓</span></button>
-        </div>
-      </div>
+      <button id="settings-toggle" class="icon-btn" title="Настройки" aria-label="Настройки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33 1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
     </div>
   </header>
 
   <main class="app">
-
+    <aside class="side-panel" id="side-left"></aside>
     <section class="board-zone" aria-label="Игровая доска">
 
       <!-- Плашка игрока: индикатор хода, счёт фигур, бейджи результата/взятия -->
@@ -227,7 +197,7 @@
       </section>
     </section>
 
-    <aside class="side-panel">
+    <aside class="side-panel" id="side-right">
       <!-- Паспорт тегов PDN в режиме расстановки -->
       <section class="panel setup-meta-panel" id="setup-meta-panel" hidden>
         <header class="panel-head">
@@ -297,6 +267,21 @@
         <div class="movelist" id="movelist" tabindex="0" aria-label="Дерево ходов">
         </div>
       </section>
+            <section class="panel library-panel" id="library-panel">
+        <header class="panel-head">
+          <h2>Библиотека</h2>
+          <span class="panel-hint" id="library-count">0</span>
+          <label class="lib-filter"><input type="checkbox" id="lib-filter" checked> только победы</label>
+        </header>
+        <div class="library-body" id="library-body"></div>
+      </section>
+      <section class="panel openings-panel" id="openings-panel">
+        <header class="panel-head">
+          <h2>Дебюты</h2>
+          <span class="panel-hint" id="openings-count">0</span>
+        </header>
+        <div class="openings-body" id="openings-body"></div>
+      </section>      
     </aside>
   </main>
 
@@ -371,6 +356,45 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="db-modal" hidden>
+    <div class="modal db-modal" role="dialog" aria-modal="true">
+      <header class="modal-head"><h3>База партий <span class="panel-hint" id="db-count"></span></h3><button class="modal-close" data-close>✕</button></header>
+      <div class="db-tools">
+        <button class="btn-secondary compact" id="db-add-file">PDN (файл)</button>
+        <button class="btn-secondary compact" id="db-add-text">Добавить из текста</button>
+        <button class="btn-primary compact" id="db-export">Экспорт games.json</button>
+        <button class="btn-secondary compact" id="db-reset">Сбросить черновик</button>
+      </div>
+      <textarea id="db-paste" spellcheck="false" placeholder="Вставьте PDN сыгранной партии (без комментариев и ветвлений)…"></textarea>
+      <div class="db-list" id="db-list"></div>
+      <input type="file" id="db-file-input" accept=".pdn,.txt" hidden>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="settings-modal" hidden>
+    <div class="modal settings-modal" role="dialog" aria-modal="true">
+      <header class="modal-head"><h3>Настройки</h3><button class="modal-close" data-close>✕</button></header>
+      <div class="settings-body">
+        <section class="set-section">
+          <h4>Тема оформления</h4>
+          <div class="set-grid" id="set-themes"></div>
+        </section>
+        <section class="set-section">
+          <h4>Вид доски и фигур</h4>
+          <div class="set-grid" id="set-boards"></div>
+        </section>
+        <section class="set-section">
+          <h4>Панели · анализ партии</h4>
+          <div id="set-analyze-rows"></div>
+        </section>
+        <section class="set-section">
+          <h4>Панели · расстановка</h4>
+          <div id="set-setup-rows"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+    
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <input type="file" id="file-input" accept=".pdn,.txt,application/octet-stream" hidden>
 

@@ -6,6 +6,7 @@
  *
  * Механика: выбор темы/скина = установка [data-theme]/[data-board] на корне;
  * CSS-переменные делают всё остальное. Выбор запоминается в localStorage.
+ * applyTheme/applyBoard экспортируются, чтобы их мог вызывать settings.js.
  */
 
 import { savePrefs } from './storage.js';
@@ -38,13 +39,15 @@ export function updateBoardMenu() {
   document.querySelectorAll('.board-opt').forEach((b) => b.classList.toggle('active', b.dataset.board === cur));
 }
 
-function applyTheme(id) {
+/** Применяет тему и сохраняет в настройки. Доступна внешним модулям (settings.js). */
+export function applyTheme(id) {
   if (!THEME_IDS.includes(id)) return;
   document.documentElement.dataset.theme = id;
   savePrefs({ theme: id });
   updateThemeMenu();
 }
-function applyBoard(id) {
+/** Применяет скин доски и сохраняет в настройки. Доступна внешним модулям (settings.js). */
+export function applyBoard(id) {
   if (!BOARD_IDS.includes(id)) return;
   document.documentElement.dataset.board = id;
   savePrefs({ board: id });
@@ -62,14 +65,14 @@ export function bindThemePickers() {
   tBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     closeBoardMenu();
-    const open = themePickerEl().classList.toggle('open');
-    tBtn.setAttribute('aria-expanded', String(open));
+    const open = themePickerEl()?.classList.toggle('open');
+    tBtn?.setAttribute('aria-expanded', String(open));
   });
   bBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     closeThemeMenu();
-    const open = boardPickerEl().classList.toggle('open');
-    bBtn.setAttribute('aria-expanded', String(open));
+    const open = boardPickerEl()?.classList.toggle('open');
+    bBtn?.setAttribute('aria-expanded', String(open));
   });
 
   document.querySelectorAll('.theme-opt').forEach((b) =>

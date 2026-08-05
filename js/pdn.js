@@ -28,9 +28,9 @@ import {
   moveToString, stateToFEN, fenToState, getGameStatus, sepForGameType, setCaptureSep,
 } from './engine.js';
 
-// Токены: комментарий ловится целиком; номер хода СОХРАНЯЕТ value (нужен для
-// определения цвета/номера первого хода вариации).
+// Токены: комментарий целиком; номер хода сохраняет value.
 const TOKEN_RE = /\{[^}]*\}|\(|\)|1\/2-1\/2|\d+-\d+|\*|\d+\.+|[a-h][1-8](?:[x:×-][a-h][1-8])+/gi;
+const RESULT_RE = /^(1-0|0-1|1\/2-1\/2|0-0|2-0|0-2|1-1|\*)$/;
 
 function tokenize(text) {
   const tokens = [];
@@ -43,7 +43,7 @@ function tokenize(text) {
     if (raw[0] === '{') tokens.push({ type: 'comment', value: raw.slice(1, -1) });
     else if (raw === '(') tokens.push({ type: 'open' });
     else if (raw === ')') tokens.push({ type: 'close' });
-    else if (/^(1-0|0-1|1\/2-1\/2|\*|\d+-\d+)$/.test(raw)) tokens.push({ type: 'result', value: raw });
+    else if (RESULT_RE.test(raw)) tokens.push({ type: 'result', value: raw });
     else if (/^\d/.test(raw)) tokens.push({ type: 'number', value: raw });
     else tokens.push({ type: 'move', raw, squares: raw.toLowerCase().split(/[x:×-]/) });
   }
@@ -51,7 +51,6 @@ function tokenize(text) {
   return tokens;
 }
 
-/** Разрешает ход по списку имён клеток: точное совпадение пути, иначе частичное, иначе первый кандидат. */
 function resolveMove(state, names, raw) {
   const path = names.map(nameToIdx);
   const bad = names.find((_, k) => path[k] < 0);
@@ -68,11 +67,6 @@ function resolveMove(state, names, raw) {
   return candidates[0];
 }
 
-/**
- * Заглядывает на первый ход вариации (пропуская номера и комментарии).
- * @returns {{num:number|null, color:string|null, squares:Array|null, raw:string|null}}
- *   num — номер хода; color — WHITE для «N.», BLACK для «N...»; squares/raw первого хода.
- */
 function peekFirstMove(tokens, start) {
   let num = null, color = null;
   for (let j = start; j < tokens.length; j++) {
@@ -90,7 +84,6 @@ function peekFirstMove(tokens, start) {
   return { num: null, color: null, squares: null, raw: null };
 }
 
-/** Пропускает вариацию целиком (от текущей «(» до парной «)»), учитывая вложенность. */
 function skipVariation(tokens, pos) {
   let depth = 1; pos.i++;
   while (pos.i < tokens.length && depth > 0) {
@@ -100,14 +93,6 @@ function skipVariation(tokens, pos) {
   }
 }
 
-/**
- * Выбирает базовую позицию и контейнер для вариации.
- *  1) по номеру/цвету первого хода: целевой ply = 2·(N−1) для белых, 2·N−1 для
- *     чёрных; ищем в стеке магистрали узел с таким state.plies — вариация
- *     становится ребёнком этого узла (сиблингом хода, который она заменяет);
- *  2) fallback: пробуем первый ход на легальность в cur и в lastNode.before.
- * Для стандартных вариаций результат совпадает с lastNode.before (обратная совместимость).
- */
 function chooseVariationBase(tokens, start, cur, lastNode, lastHome, container, lineNodes) {
   const peek = peekFirstMove(tokens, start);
   if (peek.num !== null && peek.color !== null) {
@@ -123,17 +108,12 @@ function chooseVariationBase(tokens, start, cur, lastNode, lastHome, container, 
   if (peek.color !== null) cand.sort((a, b) => (a[0].turn === peek.color ? 0 : 1) - (b[0].turn === peek.color ? 0 : 1));
   if (peek.squares) {
     for (const [b, vc] of cand) {
-      try { resolveMove(b, peek.squares, peek.raw); return { base: b, cont: vc }; } catch { /* пробуем следующую */ }
+      try { resolveMove(b, peek.squares, peek.raw); return { base: b, cont: vc }; } catch { /* next */ }
     }
   }
   return { base: cand[0][0], cont: cand[0][1] };
 }
 
-/**
- * Рекурсивный разбор последовательности ходов одного уровня.
- * @param skipped массив, куда собираются пропущенные недопустимые ходы {raw, depth}
- * @param lineNodes стек узлов магистрали текущего уровня (для базы вариаций)
- */
 function parseSequence(tokens, pos, state, container, depth, skipped, lineNodes) {
   let cur = state, lastNode = null, lastHome = container, result = null, pendingBefore = [];
   while (pos.i < tokens.length) {
@@ -150,11 +130,7 @@ function parseSequence(tokens, pos, state, container, depth, skipped, lineNodes)
         pos.i++;
         break;
       case 'open': {
-        if (!lastNode) { // вариация без предшествующего хода — безопасно пропускаем
-          skipped.push({ raw: '(вариация без хода)', depth });
-          skipVariation(tokens, pos);
-          break;
-        }
+        if (!lastNode) { skipped.push({ raw: '(вариация без хода)', depth }); skipVariation(tokens, pos); break; }
         const { base, cont } = chooseVariationBase(tokens, pos.i + 1, cur, lastNode, lastHome, container, lineNodes);
         pos.i++;
         const sub = parseSequence(tokens, pos, base, cont, depth + 1, skipped, []);
@@ -165,14 +141,8 @@ function parseSequence(tokens, pos, state, container, depth, skipped, lineNodes)
       }
       case 'move': {
         let move;
-        try {
-          move = resolveMove(cur, t.squares, t.raw);
-        } catch {
-          // либеральное чтение: недопустимый ход (обычно OCR-опечатка) пропускаем
-          skipped.push({ raw: t.raw, depth });
-          pos.i++;
-          continue;
-        }
+        try { move = resolveMove(cur, t.squares, t.raw); }
+        catch { skipped.push({ raw: t.raw, depth }); pos.i++; continue; }
         const next = makeMove(cur, move);
         const node = { move, state: next, before: cur, children: [], commentsBefore: pendingBefore, commentsAfter: [] };
         pendingBefore = [];
@@ -187,11 +157,6 @@ function parseSequence(tokens, pos, state, container, depth, skipped, lineNodes)
   return { state: cur, result };
 }
 
-/**
- * Парсит PDN-текст.
- * @returns {{headers:Object, result:string|null, rootState:Object, tree:Array, skipped:Array}}
- *   skipped — список пропущенных недопустимых ходов {raw, depth} (пуст для чистых файлов).
- */
 export function parsePDN(text) {
   if (!text || !text.trim()) throw new Error('Пустой текст PDN');
   const headers = {};
@@ -222,6 +187,62 @@ export function parsePDN(text) {
   const parsed = parseSequence(tokens, pos, rootState, tree, 0, skipped, []);
   if (tree.length === 0 && Object.keys(headers).length === 0) throw new Error('В тексте не найдено ни тегов, ни ходов');
   return { headers, result: parsed.result ?? headers.Result ?? null, rootState, tree, skipped };
+}
+
+/**
+ * Разбивает текст на партии ПОСТРОЧНО: новая партия начинается только когда
+ * встречена строка-тег ПОСЛЕ того, как уже были ходы. Устойчиво к пустым
+ * строкам между тегами и ходами одной партии и к партиям без пустых строк.
+ */
+export function parsePDNBatch(text) {
+  if (!text || !text.trim()) throw new Error('Пустой текст PDN');
+  const lines = text.split(/\r?\n/);
+  const isTagLine = (l) => /^\s*\[/.test(l);
+  const isMoveLine = (l) => /[a-h][1-8]\s*[x:×-]\s*[a-h][1-8]/i.test(l) || /^\s*\d+\./.test(l);
+
+  const chunks = [];
+  let cur = [];
+  let seenMove = false;
+  for (const line of lines) {
+    if (isTagLine(line) && seenMove) {
+      if (cur.length) chunks.push(cur.join('\n'));
+      cur = [line];
+      seenMove = false;
+    } else {
+      cur.push(line);
+      if (!isTagLine(line) && isMoveLine(line)) seenMove = true;
+    }
+  }
+  if (cur.length && cur.some((l) => l.trim())) chunks.push(cur.join('\n'));
+
+  const games = [];
+  for (const chunk of chunks) {
+    try {
+      const parsed = parsePDN(chunk);
+      if (!parsed.tree.length) { games.push({ error: 'Партия без ходов', chunk }); continue; }
+
+      let hasComments = false;
+      const cc = (n) => { if (n.commentsBefore?.length || n.commentsAfter?.length) hasComments = true; n.children?.forEach(cc); };
+      parsed.tree.forEach(cc);
+      if (hasComments) { games.push({ error: 'Партия содержит комментарии', chunk }); continue; }
+
+      let hasVariations = false;
+      const cv = (n) => { if (n.children.length > 1) hasVariations = true; n.children.forEach(cv); };
+      parsed.tree.forEach(cv);
+      if (hasVariations) { games.push({ error: 'Партия содержит ветвления', chunk }); continue; }
+
+      if (parsed.skipped && parsed.skipped.length > 0) {
+        games.push({ error: `Партия содержит недопустимые ходы: ${parsed.skipped.map((s) => s.raw).join(', ')}`, chunk });
+        continue;
+      }
+      if (!parsed.result || parsed.result === '*') { games.push({ error: 'Партия без результата', chunk }); continue; }
+      games.push(parsed);
+    } catch (e) {
+      games.push({ error: e.message, chunk });
+    }
+  }
+  if (!games.length) throw new Error('В тексте не найдено ни одной партии');
+  return games;
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');

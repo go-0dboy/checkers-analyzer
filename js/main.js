@@ -31,6 +31,9 @@ import {
 import { THEME_IDS, BOARD_IDS, bindThemePickers, updateThemeMenu, updateBoardMenu, closeThemeMenu, closeBoardMenu } from './themes.js';
 import { showToast } from './toast.js';
 import { saveSetupSVG } from './export.js';
+import { initLibraryUI } from './library.js';
+import { initSettings, getPanelPrefs, getSidePrefs, getOrderPrefs } from './settings.js';
+import { initOpeningsUI } from './openings.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -95,6 +98,7 @@ function sync() {
   renderAnalyze(history.lastMove);
   syncNav();
   syncPlayerBars();
+  document.dispatchEvent(new CustomEvent('app:sync'));
   $('#board').classList.toggle('game-over', status.over);
 }
 
@@ -118,16 +122,50 @@ function syncNav() {
   if (dbtn) dbtn.disabled = inSetup || atRoot;
 }
 
-/** Видимость панелей по режиму. */
+/** Видимость панелей по режиму и настройкам. */
 function applyModeVisibility() {
   const setup = mode === 'setup';
+  const show = getPanelPrefs();
   $('#setup-panel').hidden      = !setup;
-  $('#setup-meta-panel').hidden = !setup;
-  $('#meta-panel').hidden       = setup;
-  $('#notation-panel').hidden   = setup;
-  $('#player-top').hidden       = setup;
-  $('#player-bottom').hidden    = setup;
+  $('#setup-meta-panel').hidden = !setup || !show.setupTags;
+  $('#setup-fen-bar').hidden    = !show.setupFen;
+  $('#meta-panel').hidden       = setup || !show.meta;
+  $('#notation-panel').hidden   = setup || !show.notation;
+  $('#library-panel').hidden    = setup || !show.library;
+  $('#openings-panel').hidden   = setup || !show.openings;
+  $('#player-top').hidden       = setup || !show.players;
+  $('#player-bottom').hidden    = setup || !show.players;
   $('#controls').hidden         = setup;
+  applyLayout();
+}
+
+/** Какая колонка (left/right) соответствует какой настройке. */
+const SIDE_FOR = {
+  'setup-meta-panel': 'setupTags',
+  'meta-panel': 'meta',
+  'notation-panel': 'notation',
+  'openings-panel': 'openings',
+  'library-panel': 'library',
+};
+
+/** Раскладывает боковые панели по колонкам и сортирует внутри по порядку СВОЕГО режима. */
+function applyLayout() {
+  const left = $('#side-left'), right = $('#side-right');
+  if (!left || !right) return;
+  const sides = getSidePrefs();
+  const order = getOrderPrefs();
+  const orderVal = (key) => (key === 'setupTags' ? order.setup[key] : order.analyze[key]) ?? 0;
+  const buckets = { left: [], right: [] };
+  for (const [id, key] of Object.entries(SIDE_FOR)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    buckets[sides[key] === 'left' ? 'left' : 'right'].push({ el, key });
+  }
+  for (const col of [left, right]) {
+    const list = (col === left ? buckets.left : buckets.right)
+      .sort((a, b) => orderVal(a.key) - orderVal(b.key));
+    for (const { el } of list) col.appendChild(el);
+  }
 }
 
 /* ── плашки игроков ──────────────────────────────────────────────── */
@@ -565,6 +603,9 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('#main-menu') && !e.target.closest('#menu-toggle')) closeDrawer();
 });
 
+// настройки изменили видимость панелей — пересинхронизировать
+document.addEventListener('app:settings', () => { applyLayout(); sync(); });
+
 async function runAction(action) {
   switch (action) {
     case 'analyze': if (mode === 'setup') exitSetup(); history.toEnd(); break;
@@ -624,9 +665,13 @@ window.addEventListener('keydown', (e) => {
   if (prefs.flipped) boardUI.setFlipped(true, false);
 
   bindThemePickers();   // обработчики пикеров темы/скина
+  initSettings();   // шестерёнка + модалка настроек
+  applyLayout();   // разложить боковые панели по колонкам
+  initOpeningsUI({ history });   // панель дебютов
   setCaptureSep(':');
   sync();
   syncMetaPanel();
   updateThemeMenu();
   updateBoardMenu();
+  initLibraryUI({ history });
 })();
