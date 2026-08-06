@@ -668,7 +668,7 @@ window.addEventListener('keydown', (e) => {
 /* ── запуск ──────────────────────────────────────────────────────── */
 (function boot() {
   let prefs = loadPrefs();
-  if (prefs.orientFix !== 3) prefs = savePrefs({ flipped: false, orientFix: 3 }); // одноразовая миграция ориентации
+  if (prefs.orientFix !== 2) prefs = savePrefs({ flipped: false, orientFix: 3 }); // одноразовая миграция ориентации
   if (THEME_IDS.includes(prefs.theme)) document.documentElement.dataset.theme = prefs.theme;
   document.documentElement.dataset.board = BOARD_IDS.includes(prefs.board) ? prefs.board : 'classic';
   if (prefs.flipped) boardUI.setFlipped(true, false);
