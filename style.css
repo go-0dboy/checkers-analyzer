@@ -662,3 +662,11 @@ body.is-dragging * { cursor: grabbing !important; }
 .open-tip .meta-player { padding: .12rem .2rem; }
 .open-tip .pname { font-size: .8rem; }
 .open-tip .meta-tags { margin-top: .45rem; }
+
+/* ── вспышка на клетке съеденной шашки (автобой/ручной бой) ── */
+.square.cap-flash::after {
+  content: ''; position: absolute; inset: 6%; border-radius: 50%;
+  border: 3px solid var(--danger);
+  box-shadow: 0 0 16px rgba(226,86,59,.8), inset 0 0 12px rgba(226,86,59,.5);
+  animation: capturePulse .45s ease; pointer-events: none; z-index: 2;
+}

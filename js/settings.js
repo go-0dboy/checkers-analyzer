@@ -77,6 +77,12 @@ export function initSettings() {
       savePrefs({ panels });
       document.dispatchEvent(new CustomEvent('app:settings'));
     }
+    // тумблеры автохода/автобоя
+  modal.querySelectorAll('input[data-auto]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        savePrefs(cb.dataset.auto === 'move' ? { autoMove: cb.checked } : { autoCapture: cb.checked });
+      });
+    });    
   });
 
   modal.addEventListener('click', (e) => {
@@ -184,10 +190,23 @@ export function initSettings() {
     buildSection('set-setup-rows', ['setupFen'], ['setupTags'], 'setup');
   }
 
-  const open = () => { renderPanelRows(); refreshActive(); modal.hidden = false; };
+  const open = () => { renderPanelRows(); refreshActive(); 
+    const ap = getAutoPrefs();
+    modal.querySelectorAll('input[data-auto]').forEach((cb) => {
+      cb.checked = cb.dataset.auto === 'move' ? ap.move : ap.capture;
+    });
+    modal.hidden = false; 
+  };
+
   const close = () => { modal.hidden = true; };
 
   gear.addEventListener('click', (e) => { e.stopPropagation(); open(); });
   modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('[data-close]')) close(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) close(); });
+}
+
+/** Автоход/автобой: включены по умолчанию, отключаются явно (false). */
+export function getAutoPrefs() {
+  const p = loadPrefs();
+  return { move: p.autoMove !== false, capture: p.autoCapture !== false };
 }

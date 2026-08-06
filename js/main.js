@@ -34,6 +34,7 @@ import { saveSetupSVG } from './export.js';
 import { initLibraryUI } from './library.js';
 import { initSettings, getPanelPrefs, getSidePrefs, getOrderPrefs } from './settings.js';
 import { initOpeningsUI } from './openings.js';
+import { getAutoPrefs } from './settings.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -90,6 +91,8 @@ function lostPieces(rootState, state, color) {
 history.onChange = () => { selected = null; activeHints = null; pending = null; sync(); };
 
 function sync() {
+  stopAutoCapture();
+  stopAutoStart();
   applyModeVisibility();
   if (mode === 'setup') { syncSetup(); return; }
   const state = history.currentState;
@@ -221,41 +224,39 @@ boardUI.on('squareclick', ({ sq }) => { if (mode === 'setup') { paintSetup(sq); 
 boardUI.on('dragdrop', ({ from, to }) => { if (mode === 'setup') return; handleDragDrop(from, to); });
 
 function handleSquareClick(sq) {
+  stopAutoStart();
   const state = history.currentState;
   if (getGameStatus(state).over) return;
-
   if (pending) {
     const step = pending.nextSteps.find((s) => s.to === sq);
-    if (step) { performJumpStep(step); return; }
+    if (step) { stopAutoCapture(); performJumpStep(step); maybeAutoCapture(); return; }
     if (sq === pending.current) { renderPending(); return; }
-    // Пока прыжок ещё не сделан (стадия выбора шашки), разрешаем
-    // передумать и выбрать другую шашку с обязательным взятием.
-    if (pending.path.length === 1) {
-      const piece = state.board[sq];
-      if (piece && colorOf(piece) === state.turn) {
-        const pieceMoves = getMovesForPiece(state, sq);
-        if (pieceMoves.length && pieceMoves[0].isCapture) { startCaptureSequence(sq); return; }
-      }
-    }
     return;
   }
-
   if (selected !== null) {
-    if (sq === selected) { selected = null; activeHints = null; renderAnalyze(); return; }
     const moves = getMovesForPiece(state, selected).filter((m) => m.to === sq);
     if (moves.length) { commitMove(pickMove(moves)); return; }
   }
-
   const piece = state.board[sq];
   if (piece && colorOf(piece) === state.turn) {
     const pieceMoves = getMovesForPiece(state, sq);
-    if (pieceMoves.length) { if (pieceMoves[0].isCapture) startCaptureSequence(sq); else selectQuiet(sq, pieceMoves); return; }
+    if (pieceMoves.length) {
+      if (pieceMoves[0].isCapture) {
+        startCaptureSequence(sq);
+        maybeAutoCapture(); // автобой: крутим, пока шаг единственен
+        return;
+      }
+      // автоход: единственный тихий ход — играем сразу
+      if (autoOn().move && pieceMoves.length === 1) { commitMove(pieceMoves[0]); return; }
+      selectQuiet(sq, pieceMoves);
+      return;
+    }
   }
-
   selected = null; activeHints = null; renderAnalyze();
 }
 
 function handleDragDrop(from, to) {
+  stopAutoStart();
   if (pending) {
     if (from === pending.current) { const step = pending.nextSteps.find((s) => s.to === to); if (step) { performJumpStep(step); return; } }
     renderPending(); return;
@@ -299,6 +300,7 @@ function performJumpStep(step) {
   pending.midState = next; pending.current = step.to;
   pending.path.push(step.to); pending.captures.push(step.captured); pending.king = step.king;
   pending.nextSteps = computeNextSteps();
+  flashCapture(step.captured); // видно, что именно побито
   if (pending.nextSteps.length) renderPending(); else finalizeCapture();
 }
 
@@ -312,7 +314,60 @@ function finalizeCapture() {
 }
 
 const pickMove = (moves) => moves[0];
-function commitMove(move) { selected = null; activeHints = null; history.addMove(move); }
+/* ── автоход и автобой ───────────────────────────────────────────── */
+const AUTO_DELAY = 430; // мс между авто-шагами, чтобы взятия были видны
+let autoTimer = null;
+function stopAutoCapture() { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } }
+const autoOn = () => getAutoPrefs(); // { move, capture }
+
+/** Продолжает серию взятий автоматически, пока следующий шаг единственен. */
+function maybeAutoCapture() {
+  stopAutoCapture();
+  if (!autoOn().capture || !pending) return;
+  if (pending.nextSteps.length !== 1) return; // есть выбор — ждём игрока
+  autoTimer = setTimeout(() => {
+    autoTimer = null;
+    if (!pending) return;
+    performJumpStep(pending.nextSteps[0]);
+    maybeAutoCapture();
+  }, AUTO_DELAY);
+}
+
+/** Красная вспышка на клетке только что съеденной шашки. */
+function flashCapture(idx) {
+  const el = document.querySelector(`#board .square[data-sq="${idx}"]`);
+  if (!el) return;
+  el.classList.add('cap-flash');
+  setTimeout(() => el.classList.remove('cap-flash'), AUTO_DELAY + 80);
+}
+
+let autoStartTimer = null;
+function stopAutoStart() { if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; } }
+
+/**
+ * После любого сыгранного хода: если у стороны хода обязательное взятие
+ * и оно единственное (нет альтернатив) — запускаем автобой за этот цвет.
+ * После завершения взятия commitMove снова вызовет maybeAutoStart,
+ * и цепочка продолжится за противоположный цвет, пока есть «единственное» взятие.
+ */
+function maybeAutoStart() {
+  stopAutoStart();
+  if (!autoOn().capture || mode !== 'analyze') return;
+  const state = history.currentState;
+  if (getGameStatus(state).over) return;
+  const moves = getLegalMoves(state);
+  // взятие обязательно И единственное — иначе ждём действия игрока
+  if (!moves.length || !moves[0].isCapture || moves.length !== 1) return;
+  const from = moves[0].from;
+  autoStartTimer = setTimeout(() => {
+    autoStartTimer = null;
+    if (pending || mode !== 'analyze') return;
+    startCaptureSequence(from);
+    maybeAutoCapture(); // докрутим одиночные прыжки внутри серии
+  }, AUTO_DELAY);
+}
+
+function commitMove(move) { selected = null; activeHints = null; history.addMove(move); maybeAutoStart(); }
 
 function renderPending() {
   const display = cloneState(pending.midState);
