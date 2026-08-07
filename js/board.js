@@ -82,23 +82,14 @@ export class BoardUI {
     return this.flipped ? 63 - base : base;
   }
 
-  /** Устанавливает ориентацию; animate — плавный переворот рамки. */
-  setFlipped(flipped, animate = true) {
-    if (this.flipped === flipped) return;
-    const apply = () => {
-      this.flipped = flipped;
-      this._renderCoords();
-      if (this.lastState) this.render(this.lastState, this.lastView);
-    };
-    if (animate && this.frameEl) {
-      this.frameEl.classList.add('flipping');
-      setTimeout(apply, 240);
-      setTimeout(() => this.frameEl.classList.remove('flipping'), 540);
-    } else {
-      apply();
-    }
-  }
-  toggleFlip(animate = true) { this.setFlipped(!this.flipped, animate); }
+  /** Устанавливает ориентацию мгновенно, без анимации. */
+setFlipped(flipped) {
+  if (this.flipped === flipped) return;
+  this.flipped = flipped;
+  this._renderCoords();
+  if (this.lastState) this.render(this.lastState, this.lastView);
+}
+toggleFlip() { this.setFlipped(!this.flipped); }
 
   /** Режим расстановки: клетки кликабельны как холст, фигуры не тащим. */
   setSetupMode(on) { this.setupMode = on; this.boardEl.classList.toggle('setup-mode', on); }
