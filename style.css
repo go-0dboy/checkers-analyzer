@@ -670,3 +670,36 @@ body.is-dragging * { cursor: grabbing !important; }
   box-shadow: 0 0 16px rgba(226,86,59,.8), inset 0 0 12px rgba(226,86,59,.5);
   animation: capturePulse .45s ease; pointer-events: none; z-index: 2;
 }
+/* ── характеристики хода ── */
+.notation-toolbar { flex-wrap: wrap; }
+.ann-group { display: inline-flex; gap: .3rem; flex-wrap: wrap; }
+.nt-btn.ann { width: auto; min-width: 30px; padding: 0 .45rem; border-radius: 8px; font: 700 .72rem/1 var(--font-mono); }
+.nt-btn.ann.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.mv-ann { font-style: normal; color: var(--accent-2); font-weight: 700; margin-left: .18em; }
+
+/* ── настройки: слайдер скорости автобоя ── */
+.set-speed { margin-top: .2rem; }
+.set-speed-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .4rem; }
+.set-speed-label { font-size: .82rem; color: var(--text-dim); }
+.set-speed-val {
+  font: 700 .72rem/1 var(--font-mono); color: var(--accent-ink);
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  border-radius: 999px; padding: .3rem .65rem; min-width: 3.4em; text-align: center;
+  box-shadow: 0 2px 8px rgba(223,162,60,.35);
+}
+.set-range {
+  width: 100%; appearance: none; -webkit-appearance: none;
+  height: 4px; border-radius: 2px; background: var(--line); outline: none;
+}
+.set-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent-2); border: 2px solid var(--accent-ink);
+  box-shadow: 0 1px 5px rgba(0,0,0,.45); cursor: pointer;
+}
+.set-range::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent-2); border: 2px solid var(--accent-ink);
+  box-shadow: 0 1px 5px rgba(0,0,0,.45); cursor: pointer;
+}
+.set-range:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 4px; }

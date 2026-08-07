@@ -29,7 +29,7 @@ import {
 } from './engine.js';
 
 // Токены: комментарий целиком; номер хода сохраняет value.
-const TOKEN_RE = /\{[^}]*\}|\(|\)|1\/2-1\/2|\d+-\d+|\*|\d+\.+|[a-h][1-8](?:[x:×-][a-h][1-8])+/gi;
+const TOKEN_RE = /\{[^}]*\}|\(|\)|1\/2-1\/2|\d+-\d+|\*|\d+\.+|(?:!!|\?\?|!\?|\?!|[!?])|[a-h][1-8](?:[x:×-][a-h][1-8])+/gi;
 const RESULT_RE = /^(1-0|0-1|1\/2-1\/2|0-0|2-0|0-2|1-1|\*)$/;
 
 function tokenize(text) {
@@ -45,6 +45,7 @@ function tokenize(text) {
     else if (raw === ')') tokens.push({ type: 'close' });
     else if (RESULT_RE.test(raw)) tokens.push({ type: 'result', value: raw });
     else if (/^\d/.test(raw)) tokens.push({ type: 'number', value: raw });
+    else if (/^[!?]/.test(raw)) tokens.push({ type: 'annotation', value: raw });
     else tokens.push({ type: 'move', raw, squares: raw.toLowerCase().split(/[x:×-]/) });
   }
   if (text.slice(last).trim()) throw new Error(`Непонятный фрагмент в конце текста: «${text.slice(last).trim().slice(0, 24)}…»`);
@@ -129,6 +130,10 @@ function parseSequence(tokens, pos, state, container, depth, skipped, lineNodes)
         else pendingBefore.push(t.value);
         pos.i++;
         break;
+      case 'annotation':
+        if (lastNode) lastNode.annotation = t.value;
+          pos.i++;
+        break;
       case 'open': {
         if (!lastNode) { skipped.push({ raw: '(вариация без хода)', depth }); skipVariation(tokens, pos); break; }
         const { base, cont } = chooseVariationBase(tokens, pos.i + 1, cur, lastNode, lastHome, container, lineNodes);
@@ -168,8 +173,7 @@ export function parsePDN(text) {
     .replace(/\[\s*[A-Za-z]\w*\s+"[^"]*"\s*\]/g, ' ')
     .replace(/;[^\n]*/g, ' ')
     .replace(/\$\d+/g, ' ')
-    .replace(/%[^\n]*/g, ' ')
-    .replace(/[!?]+/g, ' ');
+    .replace(/%[^\n]*/g, ' ');
   const tokens = tokenize(moveText);
 
   let rootState;
@@ -277,7 +281,7 @@ export function generatePDN(history, headers = {}) {
   };
   const fromNode = (node, ply) => {
     pushComments(node, 'commentsBefore');
-    tokens.push(numText(ply), moveToString(node.move));
+    tokens.push(numText(ply), moveToString(node.move) + (node.annotation || ''));
     pushComments(node, 'commentsAfter');
     continuation(node, ply + 1, false);
   };
@@ -286,7 +290,7 @@ export function generatePDN(history, headers = {}) {
     const main = parent.children[0];
     pushComments(main, 'commentsBefore');
     if (ply % 2 === 0 || isFirst) tokens.push(numText(ply));
-    tokens.push(moveToString(main.move));
+    tokens.push(moveToString(main.move) + (main.annotation || ''));
     pushComments(main, 'commentsAfter');
     for (let i = 1; i < parent.children.length; i++) { tokens.push('('); fromNode(parent.children[i], ply); tokens.push(')'); }
     continuation(main, ply + 1, false);

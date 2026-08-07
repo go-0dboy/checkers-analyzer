@@ -251,6 +251,14 @@
           <span class="panel-hint">клик по ходу — переход по позиции</span>
         </header>
         <div class="notation-toolbar" role="toolbar" aria-label="Действия с ходом">
+         <span class="ann-group" id="ann-group" role="group" aria-label="Характеристика хода">
+  <button class="nt-btn ann" data-ann="!" title="Хороший ход">!</button>
+  <button class="nt-btn ann" data-ann="!!" title="Очень хороший, неожиданный, красивый ход">!!</button>
+  <button class="nt-btn ann" data-ann="?" title="Ошибка">?</button>
+  <button class="nt-btn ann" data-ann="??" title="Грубейший просмотр, зевок">??</button>
+  <button class="nt-btn ann" data-ann="!?" title="Авантюрный, азартный ход">!?</button>
+  <button class="nt-btn ann" data-ann="?!" title="Острый, но сомнительный ход">?!</button>
+</span>
           <button id="btn-comment" class="nt-btn" title="Комментарий к ходу" aria-label="Комментарий к ходу">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M7 8h7M7 12h5" />
@@ -387,6 +395,15 @@
           <h4>Поведение</h4>
           <div class="set-row"><label class="set-check"><input type="checkbox" data-auto="move"> Автоход (единственный ход — сразу)</label></div>
           <div class="set-row"><label class="set-check"><input type="checkbox" data-auto="capture"> Автобой (серия взятий до выбора)</label></div>
+          <div class="set-speed">
+            <div class="set-speed-head">
+              <span class="set-speed-label">Скорость автобоя</span>
+              <span class="set-speed-val" id="auto-delay-val">0.4 с</span>
+            </div>
+            <input type="range" id="auto-delay-range" class="set-range"
+                   min="100" max="1500" step="100" value="400"
+                   title="Задержка между авто-шагами взятия: влево — быстрее, вправо — медленнее">
+          </div>
         </section>        
         <section class="set-section">
           <h4>Панели · анализ партии</h4>

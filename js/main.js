@@ -101,6 +101,7 @@ function sync() {
   renderAnalyze(history.lastMove);
   syncNav();
   syncPlayerBars();
+  updateAnnButtons();
   document.dispatchEvent(new CustomEvent('app:sync'));
   $('#board').classList.toggle('game-over', status.over);
 }
@@ -315,7 +316,9 @@ function finalizeCapture() {
 
 const pickMove = (moves) => moves[0];
 /* ── автоход и автобой ───────────────────────────────────────────── */
-const AUTO_DELAY = 430; // мс между авто-шагами, чтобы взятия были видны
+/** Задержка автобоя (мс) берётся из настроек: Поведение → Скорость автобоя. */
+const autoDelay = () => getAutoPrefs().delay;
+
 let autoTimer = null;
 function stopAutoCapture() { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } }
 const autoOn = () => getAutoPrefs(); // { move, capture }
@@ -330,7 +333,7 @@ function maybeAutoCapture() {
     if (!pending) return;
     performJumpStep(pending.nextSteps[0]);
     maybeAutoCapture();
-  }, AUTO_DELAY);
+  }, autoDelay());
 }
 
 /** Красная вспышка на клетке только что съеденной шашки. */
@@ -338,7 +341,7 @@ function flashCapture(idx) {
   const el = document.querySelector(`#board .square[data-sq="${idx}"]`);
   if (!el) return;
   el.classList.add('cap-flash');
-  setTimeout(() => el.classList.remove('cap-flash'), AUTO_DELAY + 80);
+  setTimeout(() => el.classList.remove('cap-flash'), autoDelay() + 80);
 }
 
 let autoStartTimer = null;
@@ -364,7 +367,7 @@ function maybeAutoStart() {
     if (pending || mode !== 'analyze') return;
     startCaptureSequence(from);
     maybeAutoCapture(); // докрутим одиночные прыжки внутри серии
-  }, AUTO_DELAY);
+  }, autoDelay());
 }
 
 function commitMove(move) { selected = null; activeHints = null; history.addMove(move); maybeAutoStart(); }
@@ -611,6 +614,28 @@ commentModal.addEventListener('click', (e) => { if (e.target === commentModal ||
 $('#comment-apply').addEventListener('click', applyComment);
 $('#comment-delete').addEventListener('click', deleteComment);
 $('#btn-comment').addEventListener('click', () => { if (history.current === history.root) return; openCommentModal(history.current, 'after', null); });
+/* ── характеристики хода (! ? !! …) ─────────────────────────────── */
+document.querySelectorAll('#ann-group [data-ann]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const node = history.current;
+    if (!node || node === history.root) return;
+    const sym = btn.dataset.ann;
+    node.annotation = (node.annotation === sym) ? '' : sym; // повторно — убрать, другая — заменить
+    history.render();
+    updateAnnButtons();
+  });
+});
+
+function updateAnnButtons() {
+  const node = history.current;
+  const cur = (node && node !== history.root) ? (node.annotation || '') : '';
+  const dis = !node || node === history.root || mode === 'setup';
+  document.querySelectorAll('#ann-group [data-ann]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.ann === cur);
+    b.disabled = dis;
+  });
+}
+
 
 // Удаление хода: если вместе с ним удаляется продолжение/ветки — запрос подтверждения.
 $('#btn-delete-move').addEventListener('click', () => {

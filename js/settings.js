@@ -1,15 +1,16 @@
+
 /**
  * @module settings
  * Кнопка-шестерёнка и модалка настроек.
- * В каждой секции сначала идут НЕперемещаемые «центральные» панели (отделены
- * разделителем), затем перемещаемые, сгруппированные по колонке:
- * сначала правые, разделитель, затем левые.
- * Стрелки ↑/↓ визуально переставляют строки и сохраняют фокус.
+ * Секции: Оформление (тема+скин), Панели анализа/расстановки (видимость,
+ * колонка слева/справа, порядок стрелками), Поведение (автоход/автобой/скорость).
+ * Центральные (неперемещаемые) панели идут сверху, отделённые разделителем
+ * от перемещаемых; перемещаемые группируются: сначала правые, затем левые.
  */
 import { savePrefs, loadPrefs } from './storage.js';
 import { THEME_IDS, BOARD_IDS, updateThemeMenu, updateBoardMenu } from './themes.js';
 
-/* ── значения по умолчанию (новая раскладка v2) ─────────────────── */
+/* ── значения по умолчанию ───────────────────────────────────────── */
 const DEFAULT_PANELS = { players: false, meta: true, notation: true, library: true, openings: true, setupTags: true, setupFen: true };
 export function getPanelPrefs() {
   const p = loadPrefs();
@@ -36,19 +37,31 @@ export function getOrderPrefs() {
 }
 const MODE_OF = { meta: 'analyze', notation: 'analyze', openings: 'analyze', library: 'analyze', setupTags: 'setup' };
 
+/* ── автоход / автобой / скорость ────────────────────────────────── */
+const DELAY_MIN = 100, DELAY_MAX = 1500, DELAY_STEP = 100, DELAY_DEF = 400;
+const clampDelay = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DELAY_DEF;
+  return Math.min(DELAY_MAX, Math.max(DELAY_MIN, Math.round(n / DELAY_STEP) * DELAY_STEP));
+};
+export function getAutoPrefs() {
+  const p = loadPrefs();
+  return {
+    move: p.autoMove !== false,
+    capture: p.autoCapture !== false,
+    delay: clampDelay(p.autoDelay),
+  };
+}
+
 const THEME_NAMES = { dark: 'Орех', light: 'Пергамент', forest: 'Изумруд', midnight: 'Полночь', stone: 'Камень', wine: 'Бордо', teal: 'Океан' };
 const BOARD_NAMES = { classic: 'Классика', marble: 'Мрамор', green: 'Сукно', cherry: 'Вишня', ocean: 'Океан', graphite: 'Графит', sand: 'Песок' };
 const PANEL_LABELS = {
-  players: 'Панель игроков',
-  meta: 'Панель партии',
-  notation: 'Панель нотации',
-  openings: 'Панель дебютов',
-  library: 'Панель библиотеки',
-  setupTags: 'Панель тегов',
-  setupFen: 'Панель FEN',
+  players: 'Панель игроков', meta: 'Панель партии', notation: 'Панель нотации',
+  openings: 'Панель дебютов', library: 'Панель библиотеки',
+  setupTags: 'Панель тегов', setupFen: 'Панель FEN',
 };
 
-/* локальные apply, чтобы не зависеть от экспортов themes.js */
+/* локальные apply, чтобы не зависеть от неэкспортируемых функций themes.js */
 function applyTheme(id) { if (!THEME_IDS.includes(id)) return; document.documentElement.dataset.theme = id; savePrefs({ theme: id }); updateThemeMenu(); }
 function applyBoard(id) { if (!BOARD_IDS.includes(id)) return; document.documentElement.dataset.board = id; savePrefs({ board: id }); updateBoardMenu(); }
 
@@ -68,7 +81,7 @@ export function initSettings() {
   themeBox.addEventListener('click', (e) => { const b = e.target.closest('[data-set-theme]'); if (!b) return; applyTheme(b.dataset.setTheme); refreshActive(); });
   boardBox.addEventListener('click', (e) => { const b = e.target.closest('[data-set-board]'); if (!b) return; applyBoard(b.dataset.setBoard); refreshActive(); });
 
-  /* делегирование событий панелей */
+  /* видимость панелей */
   modal.addEventListener('change', (e) => {
     if (e.target.matches('input[data-panel]')) {
       const p = loadPrefs();
@@ -77,14 +90,29 @@ export function initSettings() {
       savePrefs({ panels });
       document.dispatchEvent(new CustomEvent('app:settings'));
     }
-    // тумблеры автохода/автобоя
-  modal.querySelectorAll('input[data-auto]').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        savePrefs(cb.dataset.auto === 'move' ? { autoMove: cb.checked } : { autoCapture: cb.checked });
-      });
-    });    
   });
 
+  /* автоход / автобой */
+  modal.querySelectorAll('input[data-auto]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      savePrefs(cb.dataset.auto === 'move' ? { autoMove: cb.checked } : { autoCapture: cb.checked });
+    });
+  });
+
+// скорость автобоя: слайдер + значение-пилюля
+  const delayRange = modal.querySelector('#auto-delay-range');
+  const delayVal = modal.querySelector('#auto-delay-val');
+  function syncSpeed() {
+    const d = getAutoPrefs().delay;
+    if (delayRange) delayRange.value = d;
+    if (delayVal) delayVal.textContent = (d / 1000).toFixed(1) + ' с';
+  }
+  delayRange?.addEventListener('input', () => {
+    savePrefs({ autoDelay: clampDelay(Number(delayRange.value)) });
+    syncSpeed();
+  });
+  
+  /* колонка и порядок — делегирование (строки перерисовываются динамически) */
   modal.addEventListener('click', (e) => {
     const sideBtn = e.target.closest('.set-side button');
     if (sideBtn) {
@@ -95,15 +123,12 @@ export function initSettings() {
       savePrefs({ sides });
       renderPanelRows();
       document.dispatchEvent(new CustomEvent('app:settings'));
-      modal.querySelector(`.set-side[data-side-for="${key}"] button[data-side="${sideBtn.dataset.side}"]`)?.focus();
       return;
     }
     const orderBtn = e.target.closest('.set-order button');
     if (orderBtn) {
       const key = orderBtn.closest('.set-order').dataset.orderFor;
       movePanel(key, orderBtn.dataset.order === 'up' ? -1 : 1);
-      const nb = modal.querySelector(`.set-order[data-order-for="${key}"] button[data-order="${orderBtn.dataset.order}"]`);
-      if (nb && !nb.disabled) nb.focus();
       return;
     }
   });
@@ -168,45 +193,45 @@ export function initSettings() {
     </div>`;
   }
 
-  /** Секция: сначала фиксированные (центр), разделитель, затем правые, разделитель, левые. */
-  function buildSection(containerId, fixedKeys, sideKeys, mode) {
-    const sides = getSidePrefs();
-    const order = getOrderPrefs()[mode] || {};
-    let html = '';
-    for (const k of fixedKeys) html += buildRow(k, false, false);
-    const right = sideKeys.filter((k) => (sides[k] || 'right') === 'right').sort((a, b) => (order[a] ?? 0) - (order[b] ?? 0));
-    const left  = sideKeys.filter((k) => (sides[k] || 'right') === 'left').sort((a, b) => (order[a] ?? 0) - (order[b] ?? 0));
-    if (right.length || left.length) {
-      if (fixedKeys.length) html += '<div class="set-divider"></div>';
-      for (const k of right) html += buildRow(k, true, true);
-      if (right.length && left.length) html += '<div class="set-divider"></div>';
-      for (const k of left) html += buildRow(k, true, true);
-    }
-    document.getElementById(containerId).innerHTML = html;
-  }
-
+  /** Центральные сверху (разделитель), затем правые, разделитель, левые. */
   function renderPanelRows() {
-    buildSection('set-analyze-rows', ['players'], ['meta', 'notation', 'openings', 'library'], 'analyze');
-    buildSection('set-setup-rows', ['setupFen'], ['setupTags'], 'setup');
+    const sides = getSidePrefs();
+    const order = getOrderPrefs();
+    const group = (keys, mode) => keys
+      .filter((k) => true)
+      .sort((a, b) => (order[mode][a] ?? 0) - (order[mode][b] ?? 0));
+
+    const aSide = ['meta', 'notation', 'openings', 'library'];
+    const aRight = group(aSide.filter((k) => (sides[k] || 'right') === 'right'), 'analyze');
+    const aLeft  = group(aSide.filter((k) => (sides[k] || 'right') === 'left'),  'analyze');
+    let aHtml = buildRow('players', false, false);
+    if (aRight.length || aLeft.length) aHtml += '<div class="set-divider"></div>';
+    for (const k of aRight) aHtml += buildRow(k, true, true);
+    if (aRight.length && aLeft.length) aHtml += '<div class="set-divider"></div>';
+    for (const k of aLeft) aHtml += buildRow(k, true, true);
+    document.getElementById('set-analyze-rows').innerHTML = aHtml;
+
+    const sRight = (sides.setupTags || 'right') === 'right' ? ['setupTags'] : [];
+    const sLeft  = (sides.setupTags || 'right') === 'left'  ? ['setupTags'] : [];
+    let sHtml = buildRow('setupFen', false, false);
+    if (sRight.length || sLeft.length) sHtml += '<div class="set-divider"></div>';
+    for (const k of sRight) sHtml += buildRow(k, true, true);
+    if (sRight.length && sLeft.length) sHtml += '<div class="set-divider"></div>';
+    for (const k of sLeft) sHtml += buildRow(k, true, true);
+    document.getElementById('set-setup-rows').innerHTML = sHtml;
   }
 
-  const open = () => { renderPanelRows(); refreshActive(); 
+  function syncBoxes() {
+    const panels = getPanelPrefs();
+    modal.querySelectorAll('input[data-panel]').forEach((cb) => { cb.checked = !!panels[cb.dataset.panel]; });
     const ap = getAutoPrefs();
-    modal.querySelectorAll('input[data-auto]').forEach((cb) => {
-      cb.checked = cb.dataset.auto === 'move' ? ap.move : ap.capture;
-    });
-    modal.hidden = false; 
-  };
+    modal.querySelectorAll('input[data-auto]').forEach((cb) => { cb.checked = cb.dataset.auto === 'move' ? ap.move : ap.capture; });
+  }
 
+  const open = () => { syncBoxes(); syncSpeed(); renderPanelRows(); refreshActive(); modal.hidden = false; };
   const close = () => { modal.hidden = true; };
 
   gear.addEventListener('click', (e) => { e.stopPropagation(); open(); });
   modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('[data-close]')) close(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) close(); });
-}
-
-/** Автоход/автобой: включены по умолчанию, отключаются явно (false). */
-export function getAutoPrefs() {
-  const p = loadPrefs();
-  return { move: p.autoMove !== false, capture: p.autoCapture !== false };
 }

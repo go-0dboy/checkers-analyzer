@@ -28,6 +28,7 @@ export class HistoryNode {
     this.children = [];
     this.commentsBefore = [];  // комментарии перед ходом
     this.commentsAfter = [];   // комментарии после хода
+    this.annotation = '';      // характеристика хода (!, ?, !! и т.д.)
   }
 }
 
@@ -80,6 +81,7 @@ export class GameHistory {
         const node = new HistoryNode(raw.move, parent, raw.state);
         node.commentsBefore = raw.commentsBefore ? raw.commentsBefore.slice() : [];
         node.commentsAfter = raw.commentsAfter ? raw.commentsAfter.slice() : [];
+        node.annotation = raw.annotation || '';
         parent.children.push(node);
         this._byNid.set(node.nid, node);
         graft(raw.children, node);
@@ -176,10 +178,12 @@ export class GameHistory {
     const s = document.createElement('span');
     s.className = 'move' + (node.move.isCapture ? ' capture-move' : '');
     s.dataset.nid = node.nid;
-    s.textContent = moveToString(node.move);
+    const ann = node.annotation || '';
+    s.innerHTML = moveToString(node.move) + (ann ? `<i class="mv-ann">${ann}</i>` : '');
     s.title = 'Перейти к позиции после этого хода';
     return s;
   }
+
   _commentSpan(text, node, phase, index) {
     const s = document.createElement('span');
     s.className = 'move-comment';
