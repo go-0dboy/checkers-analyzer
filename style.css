@@ -504,12 +504,17 @@ body.is-dragging * { cursor: grabbing !important; }
 .modal-backdrop.closing        { animation: backdropOut .17s ease forwards; }
 .modal-backdrop.closing .modal { animation: modalOut    .17s cubic-bezier(.4, 0, .6, 1) forwards; }
 @media (max-width: 1080px) { .app { grid-template-columns: minmax(0, 3fr) minmax(0, 4fr) minmax(0, 3fr); gap: 1rem; } }
-@media (max-width: 920px)  { 
-  .app { grid-template-columns: 1fr; }
-  .board-zone { order: 1; }
-  #side-left { order: 2; }
-  #side-right { order: 3; }
-  .movelist { max-height: 34vh; flex: 0 0 auto; } }
+/* ── на телефоне сворачивание в рейку отключено, сетка всегда в одну колонку ── */
+@media (max-width: 920px) {
+  .app, .app.rail-left, .app.rail-right, .app.rail-left.rail-right { grid-template-columns: 1fr; }
+  .col-collapse { display: none; }
+  .side-panel.collapsed { gap: 1rem; }
+  .side-panel.collapsed .col-tabs { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .side-panel.collapsed .col-tab { border-radius: 10px 10px 0 0; justify-content: flex-start; padding: .4rem .7rem; }
+  .side-panel.collapsed .col-tab-ico { display: none; }
+  .side-panel.collapsed .col-tab-txt { display: inline; }
+  .side-panel.collapsed .panel:not([hidden]) { display: flex !important; }
+}
 @media (max-width: 860px) {
   .hamburger { display: flex; }
   .menu { position: fixed; top: 0; right: 0; bottom: 0; z-index: 90; width: min(80vw, 320px); flex-direction: column; align-items: stretch; gap: .2rem; margin-left: 0; padding: 5.2rem 1rem 2rem; background: var(--bg-elev); border-left: 1px solid var(--line); box-shadow: -18px 0 44px var(--shadow); transform: translateX(102%); transition: transform .28s cubic-bezier(.3, 1, .4, 1); overflow-y: auto; }

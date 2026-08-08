@@ -1,12 +1,12 @@
 /**
  * @module gamesdb
- * Панель «База партий». База данных = файл пользователя {name, bases:[{id,name,games:[]}]}.
+ * Панель «База партий». База данных = объект {name, bases:[{id,name,games:[]}]}.
  * Рабочая копия — в IndexedDB (kv 'gamesdb'); файловый handle (File System Access)
  * хранится в kv 'gamesdb-handle' и при включённой настройке gdbAutosave база
  * дописывается в файл при каждом изменении (с запросом разрешения).
- * Команды: новая/открыть/сохранить базу, поиск, сортировка, добавить партию
- * (через диалог тегов, как при сохранении PDN), удалить, управление базами.
- * Клик по карточке — загрузить партию в анализатор (встанет на первый ход).
+ * Команды: новая/открыть/сохранить базу, создать/переименовать/удалить базу,
+ * поиск, сортировка, добавить партию (через диалог тегов — канал 'gdb' в main),
+ * удалить партию, клик по карточке — загрузить партию в анализатор.
  */
 import { idbGet, idbPut } from './idb.js';
 import { downloadText, pickAndReadFile, loadPrefs } from './storage.js';
@@ -27,7 +27,12 @@ const serializeDb = () => JSON.stringify({ app: 'ru-checkers-analyzer', kind: 'g
 
 export function initGamesDBUI({ history, loadPdn }) {
   historyRef = history; loadPdnRef = loadPdn;
-  restoreHandle().then(() => { wire(); refreshUI(); });
+  // ВАЖНО: сначала handle и рабочая копия, ТОЛЬКО потом wire+render (иначе db null)
+  Promise.resolve()
+    .then(restoreHandle)
+    .then(loadWorking)
+    .then(() => { wire(); refreshUI(); })
+    .catch((e) => console.warn('gamesdb init:', e));
 }
 
 /* ── файловый handle и автосохранение ── */
@@ -58,7 +63,7 @@ function scheduleAutosave() {
       if (!(await ensurePermission(fileHandle))) return;
       await writeToHandle(fileHandle, serializeDb());
     } catch (e) { console.warn('gamesdb autosave:', e); }
-  }, 600);
+  }, 500);
 }
 
 /* ── состояние ── */
@@ -70,21 +75,25 @@ async function loadWorking() {
 }
 function normalizeDb(raw) {
   if (raw && Array.isArray(raw.bases)) {
-    return { name: raw.name || 'База данных', bases: raw.bases.map((b, i) => ({ id: b.id ?? i + 1, name: b.name || `База ${i + 1}`, games: Array.isArray(b.games) ? b.games : [] })) };
+    return {
+      name: raw.name || 'База данных',
+      bases: raw.bases.map((b, i) => ({ id: b.id ?? i + 1, name: b.name || `База ${i + 1}`, games: Array.isArray(b.games) ? b.games : [] })),
+    };
   }
   if (raw && Array.isArray(raw.games)) return { name: raw.name || 'База данных', bases: [{ id: 1, name: 'Импортированные партии', games: raw.games }] };
   return { name: 'Моя база данных', bases: [{ id: 1, name: 'Мои партии', games: [] }] };
 }
 async function persist() { await idbPut('kv', { key: 'gamesdb', value: db }); scheduleAutosave(); }
-const curBase = () => db.bases.find((b) => b.id === currentBaseId) || null;
+const curBase = () => db?.bases.find((b) => b.id === currentBaseId) || null;
 
 function refreshUI() {
+  if (!db) return;
   const nameEl = $('#gdb-db-name');
   if (nameEl) nameEl.textContent = db.name || '';
   renderBaseSelect(); renderList();
 }
 function renderBaseSelect() {
-  const sel = $('#gdb-base'); if (!sel) return;
+  const sel = $('#gdb-base'); if (!sel || !db) return;
   sel.innerHTML = db.bases.map((b) => `<option value="${b.id}" ${b.id === currentBaseId ? 'selected' : ''}>${esc(b.name)} (${b.games.length})</option>`).join('');
 }
 function renderList() {
@@ -106,8 +115,9 @@ function renderList() {
     </div>`).join('');
 }
 
-/* ── добавление партии (теги редактируются в модалке сохранения, канал 'gdb') ── */
+/** Сохранение текущей партии в базу с переданными (отредактированными) тегами. */
 export async function addCurrentToDb(headers, pdn) {
+  if (!db) await loadWorking();
   const base = curBase(); if (!base) { showToast('Сначала создайте базу', 'error'); return; }
   const nextId = base.games.reduce((m, g) => Math.max(m, g.id || 0), 0) + 1;
   const rec = {
@@ -128,8 +138,6 @@ export async function addCurrentToDb(headers, pdn) {
 }
 
 function wire() {
-  loadWorking().then(refreshUI);
-
   /* файл базы данных */
   $('#gdb-new-db')?.addEventListener('click', async () => {
     if (!confirm('Создать новую пустую базу данных?\nТекущая будет закрыта (её файл на диске не изменяется).')) return;
@@ -138,7 +146,6 @@ function wire() {
     await persist(); refreshUI();
     showToast('Создана новая база данных — сохраните её в файл');
   });
-
   $('#gdb-open-db')?.addEventListener('click', async () => {
     if (window.showOpenFilePicker) {
       try {
@@ -154,8 +161,8 @@ function wire() {
     if (text == null) return;
     applyDbText(text);
   });
-
   $('#gdb-save-db')?.addEventListener('click', async () => {
+    if (!db) return;
     const text = serializeDb();
     const name = safeName(db.name) + '.json';
     if (window.showSaveFilePicker) {
@@ -172,7 +179,7 @@ function wire() {
   });
 
   /* базы внутри файла */
-  $('#gdb-base')?.addEventListener('change', async (e) => { currentBaseId = Number(e.target.value); selectedId = null; renderList(); });
+  $('#gdb-base')?.addEventListener('change', (e) => { currentBaseId = Number(e.target.value); selectedId = null; renderList(); });
   $('#gdb-base-new')?.addEventListener('click', async () => {
     const name = prompt('Название новой базы:', 'Новая база'); if (!name) return;
     const id = db.bases.reduce((m, b) => Math.max(m, b.id || 0), 0) + 1;

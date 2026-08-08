@@ -17,7 +17,7 @@ import { GameHistory } from './history.js';
 import { parsePDN, generatePDN, formatDate, detectResult } from './pdn.js';
 import {
   pickAndReadFile, downloadText, copyTextToClipboard, readTextFromClipboard,
-  suggestFilename, loadPrefs, savePrefs,
+  suggestFilename, loadPrefs, savePrefs, saveFileWithPicker,
 } from './storage.js';
 import { THEME_IDS, BOARD_IDS, bindThemePickers, updateThemeMenu, updateBoardMenu, closeThemeMenu, closeBoardMenu } from './themes.js';
 import { showToast } from './toast.js';
@@ -25,7 +25,7 @@ import { saveSetupSVG } from './export.js';
 import { initLibraryUI } from './library.js';
 import { initSettings, getPanelPrefs, getSidePrefs, getOrderPrefs, getAutoPrefs } from './settings.js';
 import { initOpeningsUI } from './openings.js';
-import { initGamesDBUI } from './gamesdb.js';
+import { initGamesDBUI, addCurrentToDb } from './gamesdb.js';
 import { idbSeedIfEmpty } from './idb.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -543,7 +543,10 @@ function fillSaveFields() {
 function collectSaveFields() { for (const [name, key] of SAVE_FIELDS) gameHeaders[key] = saveVal(name) || '?'; gameHeaders.Result = $('#save-f-result').value || '*'; }
 function openSaveModal() {
   fillSaveFields();
-  $('#save-title-text').textContent = pendingSave === 'clip' ? 'Сохранить PDN — в буфер обмена' : 'Сохранить PDN — в файл';
+  $('#save-title-text').textContent =
+    pendingSave === 'clip' ? 'Сохранить PDN — в буфер обмена' :
+    pendingSave === 'gdb' ? 'Сохранить партию в базу — теги' :
+    'Сохранить PDN — в файл';
   saveModal.classList.remove('closing'); saveModal.hidden = false;
   setTimeout(() => $('#save-f-white').focus(), 80);
 }
@@ -552,11 +555,16 @@ function closeSaveModal() {
   saveModal.classList.add('closing');
   setTimeout(() => { saveModal.classList.remove('closing'); saveModal.hidden = true; pendingSave = null; }, 170);
 }
+
 async function applySave() {
   collectSaveFields(); syncMetaPanel();
   const pdn = currentPDN(), channel = pendingSave;
   closeSaveModal();
-  if (channel === 'file') { downloadText(suggestFilename(gameHeaders), pdn); showToast('Файл PDN сохранён'); }
+  if (channel === 'file') {
+    const res = await saveFileWithPicker(suggestFilename(gameHeaders), pdn, 'application/x-draughts-pdn', { description: 'Партия PDN', extensions: ['.pdn'] });
+    if (res === 'fs') showToast('Файл PDN сохранён');
+    else if (res === 'download') showToast('PDN сохранён (скачивание)');
+  } else if (channel === 'gdb') { await addCurrentToDb(gameHeaders, currentPDN()); }
   else { try { await copyTextToClipboard(pdn); showToast('PDN скопирован в буфер обмена'); } catch (err) { showToast(err.message, 'error'); } }
 }
 saveModal.addEventListener('click', (e) => { if (e.target === saveModal || e.target.closest('[data-close]')) closeSaveModal(); });
@@ -671,6 +679,10 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.menu-group')) closeAllSubmenus();
   if (!e.target.closest('#main-menu') && !e.target.closest('#menu-toggle')) closeDrawer();
 });
+
+// «+» в базе партий — открыть диалог тегов и сохранить в базу
+document.addEventListener('app:gdb-add', () => { pendingSave = 'gdb'; openSaveModal(); });
+
 document.addEventListener('app:settings', () => { applyLayout(); sync(); });
 async function runAction(action) {
   switch (action) {
