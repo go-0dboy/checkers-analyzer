@@ -279,7 +279,6 @@
         <header class="panel-head">
           <h2>Библиотека</h2>
           <span class="panel-hint" id="library-count">0</span>
-          <label class="lib-filter"><input type="checkbox" id="lib-filter" checked> только победы</label>
         </header>
         <div class="library-body" id="library-body"></div>
       </section>
@@ -289,7 +288,47 @@
           <span class="panel-hint" id="openings-count">0</span>
         </header>
         <div class="openings-body" id="openings-body"></div>
-      </section>      
+      </section>
+      <section class="panel gamesdb-panel" id="gamesdb-panel">
+        <header class="panel-head">
+          <h2>База партий</h2>
+          <span class="gdb-db-name" id="gdb-db-name" title="Открытая база данных"></span>
+        </header>
+        <div class="gdb-base-row">
+          <select id="gdb-base" class="gdb-base-select" title="Выбор базы"></select>
+          <button class="nt-btn" id="gdb-base-new" title="Создать базу">+</button>
+          <button class="nt-btn" id="gdb-base-rename" title="Переименовать базу">✎</button>
+          <button class="nt-btn danger" id="gdb-base-del" title="Удалить базу">✕</button>
+        </div>
+        <div class="notation-toolbar gdb-toolbar">
+          <button class="nt-btn" id="gdb-new-db" title="Новая база данных (файл)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/></svg>
+          </button>
+          <button class="nt-btn" id="gdb-open-db" title="Открыть базу данных из файла">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+          </button>
+          <button class="nt-btn" id="gdb-save-db" title="Сохранить базу данных в файл">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h11l5 5v13H5V3ZM8 3v5h8V3M8 21v-7h8v7"/></svg>
+          </button>
+          <span class="ctrl-sep"></span>
+          <button class="nt-btn" id="gdb-search-btn" title="Поиск">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
+          <input id="gdb-search" class="gdb-search" placeholder="Поиск…" hidden>
+          <button class="nt-btn" id="gdb-sort" title="Сортировка: по дате">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v13M7 17l-3-3M7 17l3-3M17 20V7M17 7l-3 3M17 7l3 3"/></svg>
+          </button>
+          <span class="ctrl-sep"></span>
+          <button class="nt-btn" id="gdb-add" title="Добавить текущую партию в базу">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button class="nt-btn danger" id="gdb-del" title="Удалить выбранную партию">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+          </button>
+        </div>
+        <div class="gdb-list" id="gdb-list"></div>
+        <input type="file" id="gdb-db-file" accept=".json" hidden>
+      </section>
     </aside>
   </main>
 
@@ -393,6 +432,7 @@
         </section>
         <section class="set-section">
           <h4>Поведение</h4>
+          <label class="set-check"><input type="checkbox" data-pref="gdbAutosave"> Автосохранение базы партий в файл</label>
           <div class="set-row"><label class="set-check"><input type="checkbox" data-auto="move"> Автоход (единственный ход — сразу)</label></div>
           <div class="set-row"><label class="set-check"><input type="checkbox" data-auto="capture"> Автобой (серия взятий до выбора)</label></div>
           <div class="set-speed">
@@ -416,7 +456,7 @@
       </div>
     </div>
   </div>
-    
+  
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <input type="file" id="file-input" accept=".pdn,.txt,application/octet-stream" hidden>
 

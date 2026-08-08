@@ -1,22 +1,23 @@
 /**
  * @module library
- * База партий (data/games.json) + панель «Библиотека» в анализе + админ-инструмент.
+ * База партий «Библиотека» на IndexedDB + админ-инструмент.
  * Поиск по FEN текущей позиции; выводятся ВСЕ найденные группы ходов.
- * Клик по ходу = сыграть его; справа у группы — знак «?», по клику всплывающая
- * подсказка с тегами PDN representative-партии (как в панели «Партия»).
+ * Шапка — ход-кандидат с номером/цветом; под ним продолжение в нотации PDN
+ * (номер один раз на пару). Клик по ходу — сыграть; «?» — карточка партии.
+ * Админ (?admin=1): пакетная загрузка PDN (дубликаты — с вопросом о перезаписи),
+ * экспорт games.json, удаление, перезагрузка из IndexedDB.
  */
 import { nameToIdx, getLegalMoves, stateToFEN } from './engine.js';
 import { parsePDNBatch } from './pdn.js';
-import { downloadText } from './storage.js';
+import { downloadText, saveFileWithPicker } from './storage.js';
 import { showToast } from './toast.js';
+import { idbAll, idbPut, idbDel, idbBulkPut, idbSeedIfEmpty } from './idb.js';
 
-const DB_URL = 'data/games.json';
-const DRAFT_KEY = 'ru-checkers-analyzer:db-draft';
 const ADMIN_KEY = 'ru-checkers-analyzer:admin';
 
-let games = [], fileGames = [], index = new Map();
-let adminMode = false, winsOnly = true, historyRef = null;
-let currentList = [];   // representative-партия для каждой отрисованной группы
+let games = [], index = new Map();
+let adminMode = false, historyRef = null;
+let currentList = [];
 let tipEl = null;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -41,10 +42,8 @@ export function initLibraryUI({ history }) {
   if (adminMode) document.getElementById('menu-db')?.removeAttribute('hidden');
 
   wireAdmin();
-  document.getElementById('lib-filter')?.addEventListener('change', (e) => { winsOnly = e.target.checked; renderLibrary(); });
 
   const body = document.getElementById('library-body');
-  // клик по ходу = сыграть; клик по «?» = подсказка с тегами
   body?.addEventListener('click', (e) => {
     const h = e.target.closest('.open-help');
     if (h) {
@@ -57,11 +56,9 @@ export function initLibraryUI({ history }) {
       return;
     }
     const mv = e.target.closest('.lib-move');
-    if (mv) playLibraryMove((mv.dataset.move || mv.textContent).trim());
+    if (mv) playLibraryMove(mv.dataset.move || mv.textContent);
   });
   body?.addEventListener('scroll', hideTip, { passive: true });
-
-  // глобальные закрытия подсказки
   document.addEventListener('click', (e) => { if (tipEl && !tipEl.hidden && !e.target.closest('.open-help')) hideTip(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTip(); });
   window.addEventListener('resize', hideTip);
@@ -74,15 +71,8 @@ export function initLibraryUI({ history }) {
 }
 
 async function loadDB() {
-  let base = [];
-  try {
-    const r = await fetch(DB_URL, { cache: 'no-store' });
-    if (r.ok) base = (await r.json()).games || [];
-  } catch { base = []; }
-  fileGames = base;
-  let draft = null;
-  try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { }
-  games = (draft && Array.isArray(draft.games)) ? draft.games : base;
+  await idbSeedIfEmpty();
+  games = await idbAll('libraryGames');
   buildIndex();
 }
 
@@ -93,7 +83,6 @@ function buildIndex() {
   }));
 }
 
-/** Подсказка с тегами PDN партии — в стиле панели «Партия». */
 function gameMetaHTML(g) {
   const pr = { white: false, black: false, draw: false };
   if (g.result === '1-0' || g.result === '2-0') pr.white = true;
@@ -129,10 +118,10 @@ function renderLibrary() {
     return;
   }
 
-  const fen = stateToFEN(historyRef.currentState);
-  const side = historyRef.currentState.turn;
-  let rows = (index.get(fen) || []).map((e) => ({ g: games[e.g], p: e.p }));
-  if (winsOnly) rows = rows.filter((r) => classify(side, r.g.result) === 'w');
+  const state = historyRef.currentState;
+  const fen = stateToFEN(state);
+  const side = state.turn;
+  const rows = (index.get(fen) || []).map((e) => ({ g: games[e.g], p: e.p }));
 
   const groups = new Map();
   for (const r of rows) {
@@ -145,34 +134,44 @@ function renderLibrary() {
   const arr = [...groups.values()].sort((a, b) => (b.w - a.w) || (b.rows.length - a.rows.length));
 
   if (cnt) cnt.textContent = String(arr.length);
-  if (!arr.length) {
-    body.innerHTML = '<div class="lib-empty">В базе нет ходов из этой позиции</div>';
-    return;
-  }
+  if (!arr.length) { body.innerHTML = '<div class="lib-empty">В базе нет ходов из этой позиции</div>'; return; }
+
+  const curPly = state.plies;
+  const hn = Math.floor(curPly / 2) + 1;
+  const headNum = curPly % 2 === 0 ? `${hn}.` : `${hn}…`;
 
   body.innerHTML = arr.map((g, i) => {
     const best = g.rows.slice().sort((a, b) => orderRes(side, a.g.result) - orderRes(side, b.g.result))[0];
     currentList[i] = best.g;
-    const seqHtml = best.g.plies.slice(best.p, best.p + 8)
-      .map((x, idx) => `<span class="open-mv${idx < played.length ? ' played' : ''}">${esc(x.m)}</span>`).join(' ');
+    const startPly = best.g.startPly ?? 0;
+    const parts = [];
+    const upto = Math.min(best.g.plies.length, best.p + 1 + 8);
+    for (let k = best.p + 1; k < upto; k++) {
+      const ply = startPly + k;
+      const num = Math.floor(ply / 2) + 1;
+      const first = k === best.p + 1;
+      const pre = ply % 2 === 0 ? `${num}. ` : (first ? `${num}… ` : '');
+      parts.push(pre + best.g.plies[k].m);
+    }
+    const seq = parts.join(' ') || '—';
     return `<div class="lib-group">
       <div class="lib-head">
-        <span class="lib-move" data-move="${esc(g.mv)}" title="Сыграть этот ход">${esc(g.mv)}</span>
+        <span class="lib-move" data-move="${esc(g.mv)}" title="Сыграть этот ход">${headNum} ${esc(g.mv)}</span>
         <span class="lib-head-right">
           <span class="lib-stat">${g.rows.length} · ${g.w}–${g.d}–${g.l}</span>
           <button class="open-help" data-i="${i}" title="Данные партии" aria-label="Данные партии">?</button>
         </span>
       </div>
-      <div class="open-line">${seqHtml}</div>
+      <div class="open-line">${esc(seq)}</div>
     </div>`;
   }).join('');
 }
 
-/** Разбирает строку хода и проводит его через историю. */
 function playLibraryMove(moveStr) {
   if (!historyRef || !moveStr) return;
+  const clean = String(moveStr).replace(/^\s*\d+[.…]+\s*/, '').trim();
   const state = historyRef.currentState;
-  const squares = moveStr.toLowerCase().split(/[x:×-]/);
+  const squares = clean.toLowerCase().split(/[x:×-]/);
   if (squares.length < 2) return;
   const from = nameToIdx(squares[0]);
   const to = nameToIdx(squares[squares.length - 1]);
@@ -183,13 +182,10 @@ function playLibraryMove(moveStr) {
   historyRef.addMove(move);
 }
 
-/* ── всплывающая подсказка ── */
 function ensureTip() {
   if (!tipEl) {
     tipEl = document.createElement('div');
-    tipEl.id = 'lib-tip';
-    tipEl.className = 'open-tip';
-    tipEl.hidden = true;
+    tipEl.id = 'lib-tip'; tipEl.className = 'open-tip'; tipEl.hidden = true;
     document.body.appendChild(tipEl);
     tipEl.addEventListener('click', (e) => e.stopPropagation());
   }
@@ -198,9 +194,7 @@ function ensureTip() {
 function hideTip() { if (tipEl) tipEl.hidden = true; }
 function showTip(btn, html, key) {
   const tip = ensureTip();
-  tip.innerHTML = html;
-  tip.dataset.for = key;
-  tip.hidden = false;
+  tip.innerHTML = html; tip.dataset.for = key; tip.hidden = false;
   const r = btn.getBoundingClientRect();
   const tw = tip.offsetWidth, th = tip.offsetHeight;
   let left = r.left - tw - 10;
@@ -208,37 +202,46 @@ function showTip(btn, html, key) {
   let top = r.top - 4;
   if (top + th > window.innerHeight - 8) top = window.innerHeight - th - 8;
   if (top < 8) top = 8;
-  tip.style.left = left + 'px';
-  tip.style.top = top + 'px';
+  tip.style.left = left + 'px'; tip.style.top = top + 'px';
 }
 
-/* ── админ: наполнение базы ── */
-function moveStr(n) {
+/* ── админ ── */
+function moveStrOf(n) {
   const sep = n.move.isCapture ? ':' : '-';
   return n.move.path.map((i) => 'abcdefgh'[i % 8] + (Math.floor(i / 8) + 1)).join(sep);
 }
-function validateAndAddBatch(text) {
+
+async function validateAndAddBatch(text) {
   const parsed = parsePDNBatch(text);
-  let added = 0, skipped = 0; const errors = [];
+  const newGames = [], dups = [];
+  let skipped = 0; const errors = [];
   for (const game of parsed) {
     if (game.error) { skipped++; errors.push(game.error); continue; }
     const line = []; let n = game.tree[0];
     while (n) { line.push(n); n = n.children[0]; }
     if (!line.length) { skipped++; continue; }
-    const plies = line.map((n) => ({ m: moveStr(n), fen: stateToFEN(n.before) }));
+    const plies = line.map((n) => ({ m: moveStrOf(n), fen: stateToFEN(n.before) }));
     const h = game.headers;
     const sig = [h.White, h.Black, h.Date, h.Event, game.result, plies.map((p) => p.m).join(' ')].join('|');
-    if (games.some((g) => g.sig === sig)) { skipped++; continue; }
-    const id = games.reduce((m, g) => Math.max(m, g.id || 0), 0) + 1;
-    games.push({ id, sig, event: h.Event || '?', site: h.Site || '?', date: h.Date || '?', round: h.Round || '?', white: h.White || '?', black: h.Black || '?', result: game.result, gameType: h.GameType || '25', plies });
-    added++;
+    const rec = { sig, event: h.Event || '?', site: h.Site || '?', date: h.Date || '?', round: h.Round || '?', white: h.White || '?', black: h.Black || '?', result: game.result, gameType: h.GameType || '25', startPly: line[0].before.plies, plies };
+    const existing = games.find((g) => g.sig === sig);
+    if (existing) { dups.push({ oldId: existing.id, rec }); continue; }
+    newGames.push(rec);
   }
-  buildIndex(); saveDraft(); renderAdmin(); renderLibrary();
+  // перезапись дубликатов — с вопросом пользователю
+  if (dups.length && confirm(`Найдено совпадающих партий: ${dups.length}. Перезаписать их в библиотеке?`)) {
+    for (const d of dups) { await idbDel('libraryGames', d.oldId); newGames.push(d.rec); }
+  } else if (dups.length) {
+    skipped += dups.length;
+  }
+  if (newGames.length) await idbBulkPut('libraryGames', newGames);
+  games = await idbAll('libraryGames');
+  buildIndex(); renderAdmin(); renderLibrary();
+  const added = newGames.length;
   if (added && !skipped) showToast(`Загружено партий: ${added}`);
   else if (added) showToast(`Загружено: ${added}, пропущено: ${skipped}`, 'error', 5000);
   else showToast(`Пропущено партий: ${skipped}. ${errors.slice(0, 2).join('; ')}`, 'error', 6000);
 }
-const saveDraft = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ games })); } catch { } };
 
 function renderAdmin() {
   const c = document.getElementById('db-count'); if (c) c.textContent = String(games.length);
@@ -254,18 +257,22 @@ function wireAdmin() {
   document.getElementById('db-add-file')?.addEventListener('click', () => document.getElementById('db-file-input').click());
   document.getElementById('db-file-input')?.addEventListener('change', async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
-    try { validateAndAddBatch(await f.text()); } catch (err) { showToast(err.message, 'error', 4200); }
+    try { await validateAndAddBatch(await f.text()); } catch (err) { showToast(err.message, 'error', 4200); }
     e.target.value = '';
   });
-  document.getElementById('db-add-text')?.addEventListener('click', () => {
+  document.getElementById('db-add-text')?.addEventListener('click', async () => {
     const t = document.getElementById('db-paste').value;
-    try { validateAndAddBatch(t); document.getElementById('db-paste').value = ''; } catch (err) { showToast(err.message, 'error', 4200); }
+    try { await validateAndAddBatch(t); document.getElementById('db-paste').value = ''; } catch (err) { showToast(err.message, 'error', 4200); }
   });
-  document.getElementById('db-export')?.addEventListener('click', () => { downloadText('games.json', JSON.stringify({ version: 1, games }, null, 1), 'application/json'); showToast('games.json выгружен — положите его в data/'); });
-  document.getElementById('db-reset')?.addEventListener('click', () => { try { localStorage.removeItem(DRAFT_KEY); } catch { } games = fileGames.slice(); buildIndex(); renderAdmin(); renderLibrary(); showToast('Черновик сброшен к файлу'); });
-  document.getElementById('db-list')?.addEventListener('click', (e) => {
+  document.getElementById('db-export')?.addEventListener('click', async () => {
+    const res = await saveFileWithPicker('games.json', JSON.stringify({ version: 1, games }, null, 1), 'application/json', { description: 'Библиотека партий', extensions: ['.json'] });
+    if (res) showToast('games.json выгружен — положите файл в data/ и добавьте в manifest.json');
+  });
+  document.getElementById('db-reload')?.addEventListener('click', async () => { games = await idbAll('libraryGames'); buildIndex(); renderAdmin(); renderLibrary(); showToast('Библиотека перечитана из IndexedDB'); });
+  document.getElementById('db-list')?.addEventListener('click', async (e) => {
     const d = e.target.closest('[data-del]'); if (!d) return;
-    games = games.filter((g) => g.id !== Number(d.dataset.del));
-    buildIndex(); saveDraft(); renderAdmin(); renderLibrary();
+    await idbDel('libraryGames', Number(d.dataset.del));
+    games = await idbAll('libraryGames');
+    buildIndex(); renderAdmin(); renderLibrary();
   });
 }

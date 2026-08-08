@@ -1,10 +1,7 @@
 /**
  * @module storage
  * Ввод-вывод, не связанный с игрой: файлы, буфер обмена, локальные настройки.
- * Хранилище настроек (тема, скин, ориентация) — localStorage под одним ключом.
  */
-
-/** Диалог выбора файла → текст (null если отменено). */
 export function pickAndReadFile(inputEl, accept = '.pdn,.txt') {
   return new Promise((resolve, reject) => {
     inputEl.accept = accept;
@@ -24,7 +21,7 @@ export function pickAndReadFile(inputEl, accept = '.pdn,.txt') {
   });
 }
 
-/** Скачивание текста как файла (Blob + временная ссылка). */
+/** Скачивание текста как файла (Blob + временная ссылка) — фолбэк. */
 export function downloadText(filename, text, mime = 'application/x-draughts-pdn') {
   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
   const url = URL.createObjectURL(blob);
@@ -34,14 +31,40 @@ export function downloadText(filename, text, mime = 'application/x-draughts-pdn'
   setTimeout(() => URL.revokeObjectURL(url), 800);
 }
 
-/** Имя файла PDN из тегов (имена игроков + дата). */
+/**
+ * Сохранение файла С ДИАЛОГОМ выбора пути и имени (File System Access API).
+ * Если API недоступно (телефон/старый браузер) — фолбэк на скачивание.
+ * @returns {'fs'|'download'|null} канал сохранения или null при отмене диалога.
+ */
+export async function saveFileWithPicker(filename, text, mime = 'application/x-draughts-pdn', opts = {}) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{
+          description: opts.description || 'Файл',
+          accept: { [mime]: opts.extensions || ['.txt'] },
+        }],
+      });
+      const w = await handle.createWritable();
+      await w.write(text);
+      await w.close();
+      return 'fs';
+    } catch (e) {
+      if (e?.name === 'AbortError') return null; // пользователь отменил диалог
+      // иначе падаем в фолбэк
+    }
+  }
+  downloadText(filename, text, mime);
+  return 'download';
+}
+
 export function suggestFilename(headers = {}) {
   const parts = [headers.White, headers.Black, headers.Date].filter((v) => v && v !== '?');
   const base = parts.length ? parts.join('-') : 'partiya';
-  return base.replace(/[^\wа-яёА-ЯЁ.\-]+/g, '_').slice(0, 80) + '.pdn';
+  return base.replace(/[^\wа-яёА-ЯЁ.-]+/g, '_').slice(0, 80) + '.pdn';
 }
 
-/** Запись текста в буфер обмена (Clipboard API с фолбэком на execCommand). */
 export async function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     try { await navigator.clipboard.writeText(text); return; } catch { /* фолбэк ниже */ }
@@ -55,7 +78,6 @@ export async function copyTextToClipboard(text) {
   if (!ok) throw new Error('Браузер не дал доступа к буферу обмена');
 }
 
-/** Чтение текста из буфера обмена. */
 export async function readTextFromClipboard() {
   if (!navigator.clipboard?.readText) throw new Error('Нет доступа к буферу обмена — вставьте PDN вручную');
   try { return await navigator.clipboard.readText(); }
@@ -63,14 +85,10 @@ export async function readTextFromClipboard() {
 }
 
 const PREFS_KEY = 'ru-checkers-analyzer:prefs';
-
-/** Читает объект настроек ({} при ошибке/отсутствии). */
 export function loadPrefs() {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY)) ?? {}; }
   catch { return {}; }
 }
-
-/** Сливает patch в настройки и сохраняет; возвращает итоговый объект. */
 export function savePrefs(patch) {
   try {
     const merged = { ...loadPrefs(), ...patch };

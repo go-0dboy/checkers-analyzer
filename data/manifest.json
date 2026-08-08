@@ -1,0 +1,4 @@
+{
+  "library": ["games.json"],
+  "openings": ["openings.json"]
+}

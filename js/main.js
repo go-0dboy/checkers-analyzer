@@ -26,7 +26,7 @@ import { GameHistory } from './history.js';
 import { parsePDN, generatePDN, formatDate, detectResult } from './pdn.js';
 import {
   pickAndReadFile, downloadText, copyTextToClipboard, readTextFromClipboard,
-  suggestFilename, loadPrefs, savePrefs,
+  suggestFilename, loadPrefs, savePrefs, saveFileWithPicker,
 } from './storage.js';
 import { THEME_IDS, BOARD_IDS, bindThemePickers, updateThemeMenu, updateBoardMenu, closeThemeMenu, closeBoardMenu } from './themes.js';
 import { showToast } from './toast.js';
@@ -35,6 +35,8 @@ import { initLibraryUI } from './library.js';
 import { initSettings, getPanelPrefs, getSidePrefs, getOrderPrefs } from './settings.js';
 import { initOpeningsUI } from './openings.js';
 import { getAutoPrefs } from './settings.js';
+import { initGamesDBUI, addCurrentToDb } from './gamesdb.js';
+import { idbSeedIfEmpty } from './idb.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -137,6 +139,7 @@ function applyModeVisibility() {
   $('#notation-panel').hidden   = setup || !show.notation;
   $('#library-panel').hidden    = setup || !show.library;
   $('#openings-panel').hidden   = setup || !show.openings;
+  $('#gamesdb-panel').hidden    = setup || !show.gamesdb;
   $('#player-top').hidden       = setup || !show.players;
   $('#player-bottom').hidden    = setup || !show.players;
   $('#controls').hidden         = setup;
@@ -150,6 +153,7 @@ const SIDE_FOR = {
   'notation-panel': 'notation',
   'openings-panel': 'openings',
   'library-panel': 'library',
+  'gamesdb-panel': 'gamesdb',
 };
 
 /** Раскладывает боковые панели по колонкам; трогает DOM только при реальном изменении. */
@@ -557,7 +561,10 @@ function fillSaveFields() {
 function collectSaveFields() { for (const [name, key] of SAVE_FIELDS) gameHeaders[key] = saveVal(name) || '?'; gameHeaders.Result = $('#save-f-result').value || '*'; }
 function openSaveModal() {
   fillSaveFields();
-  $('#save-title-text').textContent = pendingSave === 'clip' ? 'Сохранить PDN — в буфер обмена' : 'Сохранить PDN — в файл';
+    $('#save-title-text').textContent =
+    pendingSave === 'clip' ? 'Сохранить PDN — в буфер обмена' :
+    pendingSave === 'gdb' ? 'Сохранить партию в базу — теги' :
+    'Сохранить PDN — в файл';
   saveModal.classList.remove('closing'); saveModal.hidden = false;
   setTimeout(() => $('#save-f-white').focus(), 80);
 }
@@ -570,7 +577,12 @@ async function applySave() {
   collectSaveFields(); syncMetaPanel();
   const pdn = currentPDN(), channel = pendingSave;
   closeSaveModal();
-  if (channel === 'file') { downloadText(suggestFilename(gameHeaders), pdn); showToast('Файл PDN сохранён'); }
+  if (channel === 'file') {
+    const res = await saveFileWithPicker(suggestFilename(gameHeaders), pdn, 'application/x-draughts-pdn', { description: 'Партия PDN', extensions: ['.pdn'] });
+    if (res === 'fs') showToast('Файл PDN сохранён');
+    else if (res === 'download') showToast('PDN сохранён (скачивание)');
+  }  
+  else if (channel === 'gdb') { await addCurrentToDb(gameHeaders, currentPDN()); }
   else { try { await copyTextToClipboard(pdn); showToast('PDN скопирован в буфер обмена'); } catch (err) { showToast(err.message, 'error'); } }
 }
 saveModal.addEventListener('click', (e) => { if (e.target === saveModal || e.target.closest('[data-close]')) closeSaveModal(); });
@@ -654,7 +666,7 @@ function loadPDNText(text) {
   gameHeaders = {};
   for (const key of ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result', 'GameType']) if (parsed.headers[key]) gameHeaders[key] = parsed.headers[key];
   history.loadFromTree(parsed.rootState, parsed.tree);
-  history.toEnd(); syncMetaPanel();
+  syncMetaPanel();
 
   const skipped = parsed.skipped || [];
   if (skipped.length) {
@@ -694,6 +706,9 @@ document.addEventListener('click', (e) => {
 
 // настройки изменили видимость панелей — пересинхронизировать
 document.addEventListener('app:settings', () => { applyLayout(); sync(); });
+
+// «+» в базе партий — открыть диалог тегов и сохранить в базу
+document.addEventListener('app:gdb-add', () => { pendingSave = 'gdb'; openSaveModal(); });
 
 async function runAction(action) {
   switch (action) {
@@ -763,4 +778,11 @@ window.addEventListener('keydown', (e) => {
   updateThemeMenu();
   updateBoardMenu();
   initLibraryUI({ history });
+  // панель «База партий»; при открытии партии из базы выходим из расстановки
+  initGamesDBUI({
+    history,
+    loadPdn: (text) => { if (mode === 'setup') exitSetup(); loadPDNText(text); },
+    getHeaders: () => gameHeaders,   // теги текущей партии — сохраняются в базу
+    currentPdn: () => currentPDN(),
+  });
 })();

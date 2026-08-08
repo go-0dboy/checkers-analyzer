@@ -1,67 +1,40 @@
-
 /**
  * @module settings
- * Кнопка-шестерёнка и модалка настроек.
- * Секции: Оформление (тема+скин), Панели анализа/расстановки (видимость,
- * колонка слева/справа, порядок стрелками), Поведение (автоход/автобой/скорость).
- * Центральные (неперемещаемые) панели идут сверху, отделённые разделителем
- * от перемещаемых; перемещаемые группируются: сначала правые, затем левые.
+ * Шестерёнка + модалка. Темы/скины; видимость панелей; колонки слева/справа;
+ * порядок стрелками (центральные сверху, разделитель, правые, разделитель, левые);
+ * поведение: автоход, автобой, скорость автобоя (слайдер).
  */
 import { savePrefs, loadPrefs } from './storage.js';
 import { THEME_IDS, BOARD_IDS, updateThemeMenu, updateBoardMenu } from './themes.js';
 
-/* ── значения по умолчанию ───────────────────────────────────────── */
-const DEFAULT_PANELS = { players: false, meta: true, notation: true, library: true, openings: true, setupTags: true, setupFen: true };
-export function getPanelPrefs() {
-  const p = loadPrefs();
-  return Object.assign({}, DEFAULT_PANELS, p.panels || {});
-}
+const DEFAULT_PANELS = { players: false, meta: true, notation: true, library: true, openings: true, gamesdb: true, setupTags: true, setupFen: true };
+export function getPanelPrefs() { const p = loadPrefs(); return Object.assign({}, DEFAULT_PANELS, p.panels || {}); }
 
-const DEFAULT_SIDES = { meta: 'left', notation: 'right', library: 'left', openings: 'left', setupTags: 'right' };
-export function getSidePrefs() {
-  const p = loadPrefs();
-  return Object.assign({}, DEFAULT_SIDES, p.sides || {});
-}
+const DEFAULT_SIDES = { meta: 'left', notation: 'right', library: 'left', openings: 'left', gamesdb: 'right', setupTags: 'right' };
+export function getSidePrefs() { const p = loadPrefs(); return Object.assign({}, DEFAULT_SIDES, p.sides || {}); }
 
 const DEFAULT_ORDER = {
-  analyze: { meta: 0, library: 1, openings: 2, notation: 0 },
+  analyze: { meta: 0, library: 1, openings: 2, gamesdb: 3, notation: 0 },
   setup:   { setupTags: 0 },
 };
 export function getOrderPrefs() {
-  const p = loadPrefs();
-  const o = p.order || {};
-  return {
-    analyze: Object.assign({}, DEFAULT_ORDER.analyze, o.analyze || {}),
-    setup:   Object.assign({}, DEFAULT_ORDER.setup,   o.setup   || {}),
-  };
+  const p = loadPrefs(); const o = p.order || {};
+  return { analyze: Object.assign({}, DEFAULT_ORDER.analyze, o.analyze || {}), setup: Object.assign({}, DEFAULT_ORDER.setup, o.setup || {}) };
 }
-const MODE_OF = { meta: 'analyze', notation: 'analyze', openings: 'analyze', library: 'analyze', setupTags: 'setup' };
+const MODE_OF = { meta: 'analyze', notation: 'analyze', openings: 'analyze', library: 'analyze', gamesdb: 'analyze', setupTags: 'setup' };
 
-/* ── автоход / автобой / скорость ────────────────────────────────── */
 const DELAY_MIN = 100, DELAY_MAX = 1500, DELAY_STEP = 100, DELAY_DEF = 400;
-const clampDelay = (v) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return DELAY_DEF;
-  return Math.min(DELAY_MAX, Math.max(DELAY_MIN, Math.round(n / DELAY_STEP) * DELAY_STEP));
-};
-export function getAutoPrefs() {
-  const p = loadPrefs();
-  return {
-    move: p.autoMove !== false,
-    capture: p.autoCapture !== false,
-    delay: clampDelay(p.autoDelay),
-  };
-}
+const clampDelay = (v) => { const n = Number(v); if (!Number.isFinite(n)) return DELAY_DEF; return Math.min(DELAY_MAX, Math.max(DELAY_MIN, Math.round(n / DELAY_STEP) * DELAY_STEP)); };
+export function getAutoPrefs() { const p = loadPrefs(); return { move: p.autoMove !== false, capture: p.autoCapture !== false, delay: clampDelay(p.autoDelay) }; }
 
 const THEME_NAMES = { dark: 'Орех', light: 'Пергамент', forest: 'Изумруд', midnight: 'Полночь', stone: 'Камень', wine: 'Бордо', teal: 'Океан' };
 const BOARD_NAMES = { classic: 'Классика', marble: 'Мрамор', green: 'Сукно', cherry: 'Вишня', ocean: 'Океан', graphite: 'Графит', sand: 'Песок' };
 const PANEL_LABELS = {
   players: 'Панель игроков', meta: 'Панель партии', notation: 'Панель нотации',
-  openings: 'Панель дебютов', library: 'Панель библиотеки',
+  openings: 'Панель дебютов', library: 'Панель библиотеки', gamesdb: 'База партий',
   setupTags: 'Панель тегов', setupFen: 'Панель FEN',
 };
 
-/* локальные apply, чтобы не зависеть от неэкспортируемых функций themes.js */
 function applyTheme(id) { if (!THEME_IDS.includes(id)) return; document.documentElement.dataset.theme = id; savePrefs({ theme: id }); updateThemeMenu(); }
 function applyBoard(id) { if (!BOARD_IDS.includes(id)) return; document.documentElement.dataset.board = id; savePrefs({ board: id }); updateBoardMenu(); }
 
@@ -72,89 +45,60 @@ export function initSettings() {
 
   const themeBox = modal.querySelector('#set-themes');
   const boardBox = modal.querySelector('#set-boards');
-
-  themeBox.innerHTML = THEME_IDS.map((id) =>
-    `<button class="set-opt" data-set-theme="${id}"><span class="set-swatch set-swatch-${id}"></span><span class="set-name">${THEME_NAMES[id] || id}</span></button>`).join('');
-  boardBox.innerHTML = BOARD_IDS.map((id) =>
-    `<button class="set-opt" data-set-board="${id}"><span class="set-swatch set-board-${id}"></span><span class="set-name">${BOARD_NAMES[id] || id}</span></button>`).join('');
-
+  themeBox.innerHTML = THEME_IDS.map((id) => `<button class="set-opt" data-set-theme="${id}"><span class="set-swatch set-swatch-${id}"></span><span class="set-name">${THEME_NAMES[id] || id}</span></button>`).join('');
+  boardBox.innerHTML = BOARD_IDS.map((id) => `<button class="set-opt" data-set-board="${id}"><span class="set-swatch set-board-${id}"></span><span class="set-name">${BOARD_NAMES[id] || id}</span></button>`).join('');
   themeBox.addEventListener('click', (e) => { const b = e.target.closest('[data-set-theme]'); if (!b) return; applyTheme(b.dataset.setTheme); refreshActive(); });
   boardBox.addEventListener('click', (e) => { const b = e.target.closest('[data-set-board]'); if (!b) return; applyBoard(b.dataset.setBoard); refreshActive(); });
 
-  /* видимость панелей */
   modal.addEventListener('change', (e) => {
     if (e.target.matches('input[data-panel]')) {
-      const p = loadPrefs();
-      const panels = Object.assign({}, DEFAULT_PANELS, p.panels || {});
-      panels[e.target.dataset.panel] = e.target.checked;
-      savePrefs({ panels });
+      const p = loadPrefs(); const panels = Object.assign({}, DEFAULT_PANELS, p.panels || {});
+      panels[e.target.dataset.panel] = e.target.checked; savePrefs({ panels });
       document.dispatchEvent(new CustomEvent('app:settings'));
     }
   });
 
-  /* автоход / автобой */
-  modal.querySelectorAll('input[data-auto]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      savePrefs(cb.dataset.auto === 'move' ? { autoMove: cb.checked } : { autoCapture: cb.checked });
-    });
-  });
+  modal.querySelectorAll('input[data-auto]').forEach((cb) => cb.addEventListener('change', () => {
+    savePrefs(cb.dataset.auto === 'move' ? { autoMove: cb.checked } : { autoCapture: cb.checked });
+  }));
 
-// скорость автобоя: слайдер + значение-пилюля
+  modal.querySelectorAll('input[data-pref]').forEach((cb) => cb.addEventListener('change', () => {
+    savePrefs({ [cb.dataset.pref]: cb.checked });
+  }));
+
   const delayRange = modal.querySelector('#auto-delay-range');
   const delayVal = modal.querySelector('#auto-delay-val');
-  function syncSpeed() {
-    const d = getAutoPrefs().delay;
-    if (delayRange) delayRange.value = d;
-    if (delayVal) delayVal.textContent = (d / 1000).toFixed(1) + ' с';
-  }
-  delayRange?.addEventListener('input', () => {
-    savePrefs({ autoDelay: clampDelay(Number(delayRange.value)) });
-    syncSpeed();
-  });
-  
-  /* колонка и порядок — делегирование (строки перерисовываются динамически) */
+  function syncSpeed() { const d = getAutoPrefs().delay; if (delayRange) delayRange.value = d; if (delayVal) delayVal.textContent = (d / 1000).toFixed(1) + ' с'; }
+  delayRange?.addEventListener('input', () => { savePrefs({ autoDelay: clampDelay(Number(delayRange.value)) }); syncSpeed(); });
+
   modal.addEventListener('click', (e) => {
     const sideBtn = e.target.closest('.set-side button');
     if (sideBtn) {
       const key = sideBtn.closest('.set-side').dataset.sideFor;
-      const p = loadPrefs();
-      const sides = Object.assign({}, DEFAULT_SIDES, p.sides || {});
-      sides[key] = sideBtn.dataset.side;
-      savePrefs({ sides });
-      renderPanelRows();
-      document.dispatchEvent(new CustomEvent('app:settings'));
+      const p = loadPrefs(); const sides = Object.assign({}, DEFAULT_SIDES, p.sides || {});
+      sides[key] = sideBtn.dataset.side; savePrefs({ sides });
+      renderPanelRows(); document.dispatchEvent(new CustomEvent('app:settings'));
       return;
     }
     const orderBtn = e.target.closest('.set-order button');
-    if (orderBtn) {
-      const key = orderBtn.closest('.set-order').dataset.orderFor;
-      movePanel(key, orderBtn.dataset.order === 'up' ? -1 : 1);
-      return;
-    }
+    if (orderBtn) { movePanel(orderBtn.closest('.set-order').dataset.orderFor, orderBtn.dataset.order === 'up' ? -1 : 1); return; }
   });
 
   function keysInColOf(key) {
-    const sides = getSidePrefs();
-    const order = getOrderPrefs();
+    const sides = getSidePrefs(); const order = getOrderPrefs();
     const mode = MODE_OF[key] || 'analyze';
     const col = (sides[key] || 'right') === 'left' ? 'left' : 'right';
     return Object.keys(sides)
       .filter((k) => (MODE_OF[k] || 'analyze') === mode && ((sides[k] || 'right') === 'left' ? 'left' : 'right') === col)
       .sort((a, b) => (order[mode][a] ?? 0) - (order[mode][b] ?? 0));
   }
-
   function movePanel(key, dir) {
-    const order = getOrderPrefs();
-    const mode = MODE_OF[key] || 'analyze';
-    const list = keysInColOf(key);
-    const idx = list.indexOf(key);
-    const swapWith = list[idx + dir];
+    const order = getOrderPrefs(); const mode = MODE_OF[key] || 'analyze';
+    const list = keysInColOf(key); const idx = list.indexOf(key); const swapWith = list[idx + dir];
     if (swapWith === undefined) return;
     const next = { analyze: { ...order.analyze }, setup: { ...order.setup } };
     const tmp = next[mode][key]; next[mode][key] = next[mode][swapWith]; next[mode][swapWith] = tmp;
-    savePrefs({ order: next });
-    renderPanelRows();
-    document.dispatchEvent(new CustomEvent('app:settings'));
+    savePrefs({ order: next }); renderPanelRows(); document.dispatchEvent(new CustomEvent('app:settings'));
   }
 
   function refreshActive() {
@@ -164,15 +108,13 @@ export function initSettings() {
   }
 
   function buildRow(key, withSide, withOrder) {
-    const panels = getPanelPrefs();
-    const sides = getSidePrefs();
+    const panels = getPanelPrefs(); const sides = getSidePrefs();
     const checked = panels[key] ? 'checked' : '';
     let controls = '';
     if (withOrder || withSide) {
       controls = '<span class="set-row-controls">';
       if (withOrder) {
-        const list = keysInColOf(key);
-        const idx = list.indexOf(key);
+        const list = keysInColOf(key); const idx = list.indexOf(key);
         controls += `<span class="set-order" data-order-for="${key}">
           <button type="button" data-order="up" title="Выше" ${idx <= 0 ? 'disabled' : ''}>↑</button>
           <button type="button" data-order="down" title="Ниже" ${idx >= list.length - 1 ? 'disabled' : ''}>↓</button>
@@ -193,17 +135,13 @@ export function initSettings() {
     </div>`;
   }
 
-  /** Центральные сверху (разделитель), затем правые, разделитель, левые. */
   function renderPanelRows() {
-    const sides = getSidePrefs();
-    const order = getOrderPrefs();
-    const group = (keys, mode) => keys
-      .filter((k) => true)
-      .sort((a, b) => (order[mode][a] ?? 0) - (order[mode][b] ?? 0));
+    const sides = getSidePrefs(); const order = getOrderPrefs();
+    const sortG = (keys, mode) => keys.slice().sort((a, b) => (order[mode][a] ?? 0) - (order[mode][b] ?? 0));
 
-    const aSide = ['meta', 'notation', 'openings', 'library'];
-    const aRight = group(aSide.filter((k) => (sides[k] || 'right') === 'right'), 'analyze');
-    const aLeft  = group(aSide.filter((k) => (sides[k] || 'right') === 'left'),  'analyze');
+    const aSide = ['meta', 'notation', 'openings', 'library', 'gamesdb'];
+    const aRight = sortG(aSide.filter((k) => (sides[k] || 'right') === 'right'), 'analyze');
+    const aLeft = sortG(aSide.filter((k) => (sides[k] || 'right') === 'left'), 'analyze');
     let aHtml = buildRow('players', false, false);
     if (aRight.length || aLeft.length) aHtml += '<div class="set-divider"></div>';
     for (const k of aRight) aHtml += buildRow(k, true, true);
@@ -212,7 +150,7 @@ export function initSettings() {
     document.getElementById('set-analyze-rows').innerHTML = aHtml;
 
     const sRight = (sides.setupTags || 'right') === 'right' ? ['setupTags'] : [];
-    const sLeft  = (sides.setupTags || 'right') === 'left'  ? ['setupTags'] : [];
+    const sLeft = (sides.setupTags || 'right') === 'left' ? ['setupTags'] : [];
     let sHtml = buildRow('setupFen', false, false);
     if (sRight.length || sLeft.length) sHtml += '<div class="set-divider"></div>';
     for (const k of sRight) sHtml += buildRow(k, true, true);
@@ -226,6 +164,7 @@ export function initSettings() {
     modal.querySelectorAll('input[data-panel]').forEach((cb) => { cb.checked = !!panels[cb.dataset.panel]; });
     const ap = getAutoPrefs();
     modal.querySelectorAll('input[data-auto]').forEach((cb) => { cb.checked = cb.dataset.auto === 'move' ? ap.move : ap.capture; });
+    modal.querySelectorAll('input[data-pref]').forEach((cb) => { cb.checked = !!loadPrefs()[cb.dataset.pref]; });
   }
 
   const open = () => { syncBoxes(); syncSpeed(); renderPanelRows(); refreshActive(); modal.hidden = false; };

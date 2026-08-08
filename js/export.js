@@ -15,23 +15,21 @@
 
 import { formatDate } from './pdn.js';
 import { showToast } from './toast.js';
+import { saveFileWithPicker } from './storage.js';
 
 /** Скачивание SVG-текста как файла с корректным MIME image/svg+xml. */
-function downloadSVG(filename, svgText) {
-  const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
+async function downloadSVG(filename, svgText) {
+  const res = await saveFileWithPicker(filename, svgText, 'image/svg+xml', { description: 'Позиция SVG', extensions: ['.svg'] });
+  return res;
 }
+
 
 /**
  * Собирает SVG текущей доски прямо из отрисованного DOM и скачивает файл.
  * Читает порядок клеток, свет/тьму полей, фигуры и подписи координат из
  * готовой разметки — экспорт совпадает с экраном и учитывает переворот.
  */
-export function saveSetupSVG() {
+export async function saveSetupSVG() {
   const boardEl = document.getElementById('board');
   const squares = boardEl ? [...boardEl.children] : [];
   if (squares.length !== 64) { showToast('Доска не готова для экспорта', 'error'); return; }
@@ -105,6 +103,6 @@ ${ranks.join('\n')}
 ${pieces.join('\n')}
 </svg>`;
 
-  downloadSVG(`shashki-position-${formatDate().replace(/\./g, '-')}.svg`, svg);
-  showToast('Позиция сохранена в SVG');
+  const res = await downloadSVG(`shashki-position-${formatDate().replace(/\./g, '-')}.svg`, svg);
+  if (res) showToast('Позиция сохранена в SVG');
 }

@@ -701,3 +701,21 @@ body.is-dragging * { cursor: grabbing !important; }
   box-shadow: 0 1px 5px rgba(0,0,0,.45); cursor: pointer;
 }
 .set-range:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 4px; }
+
+/* ── панель «База партий» ── */
+.gamesdb-panel { animation-delay: .24s; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.gdb-base-select { max-width: 46%; background: var(--bg-elev); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: .3rem .5rem; font: 600 .72rem/1.2 var(--font-mono); }
+.gdb-search { flex: 1 1 auto; min-width: 0; background: var(--bg-elev); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: .35rem .55rem; font: 500 .74rem/1.2 var(--font-mono); }
+.gdb-list { padding: .6rem .8rem .8rem; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: .45rem; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.gdb-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: .45rem .6rem; cursor: pointer; transition: border-color .14s, transform .14s, box-shadow .14s; }
+.gdb-card:hover { border-color: var(--line-soft); transform: translateY(-1px); box-shadow: 0 4px 10px var(--shadow); }
+.gdb-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.gdb-line1 { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.gdb-names { font-weight: 700; font-size: .76rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gdb-res { font: 700 .66rem/1 var(--font-mono); color: var(--accent-2); flex: none; }
+.gdb-line2 { font-size: .66rem; color: var(--text-faint); margin-top: .15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── база партий: строка управления базами ── */
+.gdb-base-row { display: flex; align-items: center; gap: .35rem; padding: .45rem .8rem 0; }
+.gdb-base-row .gdb-base-select { flex: 1 1 auto; max-width: none; }
+.gdb-db-name { font-size: .66rem; color: var(--text-faint); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
