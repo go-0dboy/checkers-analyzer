@@ -719,3 +719,56 @@ body.is-dragging * { cursor: grabbing !important; }
 .gdb-base-row { display: flex; align-items: center; gap: .35rem; padding: .45rem .8rem 0; }
 .gdb-base-row .gdb-base-select { flex: 1 1 auto; max-width: none; }
 .gdb-db-name { font-size: .66rem; color: var(--text-faint); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+
+/* ── вкладки колонок ── */
+.col-tabs { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+.col-tab { display: inline-flex; align-items: center; gap: .35rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px 10px 0 0; padding: .4rem .7rem; cursor: pointer; color: var(--text-dim); font: 600 .72rem/1 var(--font-mono); transition: color .14s, background .14s, border-color .14s; }
+.col-tab:hover { color: var(--text); }
+.col-tab.active { color: var(--accent-2); background: var(--panel-2); border-color: var(--accent); }
+.col-tab-ico { display: none; font-weight: 800; }
+.col-collapse { margin-left: auto; background: none; border: 1px solid var(--line); border-radius: 8px; color: var(--text-faint); cursor: pointer; padding: .3rem .5rem; font-size: .72rem; }
+.col-collapse:hover { color: var(--text); }
+/* свёрнутая колонка-рейка */
+.side-panel.collapsed { gap: .3rem; }
+.side-panel.collapsed .col-tabs { flex-direction: column; align-items: stretch; }
+.side-panel.collapsed .col-tab { border-radius: 10px; justify-content: center; padding: .55rem 0; }
+.side-panel.collapsed .col-tab-txt { display: none; }
+.side-panel.collapsed .col-tab-ico { display: block; }
+.side-panel.collapsed .panel { display: none !important; }
+.app.rail-left  { grid-template-columns: 56px minmax(0, 4fr) minmax(0, 3fr); }
+.app.rail-right { grid-template-columns: minmax(0, 3fr) minmax(0, 4fr) 56px; }
+.app.rail-left.rail-right { grid-template-columns: 56px minmax(0, 4fr) 56px; }
+/* ── компактный режим ── */
+body.compact .app { gap: .7rem; padding: .8rem clamp(.7rem, 2vw, 2rem) 1.4rem; }
+body.compact .side-panel { gap: .5rem; }
+body.compact .player-bar { min-height: 42px; padding: .4rem .7rem; }
+body.compact .panel-head { padding: .5rem .8rem .4rem; }
+body.compact .movelist { font-size: .78rem; line-height: 1.55; padding: .5rem .8rem .7rem; }
+body.compact .ctrl-btn { width: 40px; height: 40px; }
+body.compact .board-frame { padding: 6px; }
+body.compact .col-tabs { gap: .2rem; }
+body.compact .col-tab { padding: .3rem .55rem; }
+
+/* ── плашки игроков: две строки, компактнее, без счёта шашек/дамок ── */
+.player-bar { flex-wrap: wrap; row-gap: .12rem; padding: .5rem .9rem; min-height: 46px; }
+.player-name { font-size: .66rem; letter-spacing: .1em; }
+.player-meta { order: 10; flex-basis: 100%; margin-left: calc(20px + .65rem); font-size: .64rem; line-height: 1.35; white-space: normal; color: var(--text-faint); }
+.player-result { font-size: .56rem; padding: .18rem .5rem; }
+.player-capture { font-size: .56rem; }
+.tray-disc { width: 10px; height: 10px; }
+
+/* ── библиотека и дебюты растягиваются до конца колонки (как нотация/база) ── */
+.library-panel, .openings-panel { flex: 1 1 auto; max-height: none; min-height: 0; }
+
+/* ── «лестница» нотации: магистраль слева, варианты ступенями вглубь ── */
+.movelist .var-block { padding: .18em .45em .18em 14px; border-radius: 6px; }
+.var-block[data-depth="1"] { margin-left: 2px;  background: rgba(128,128,128,.07); }
+.var-block[data-depth="2"] { margin-left: 10px; background: rgba(128,128,128,.10); }
+.var-block[data-depth="3"] { margin-left: 18px; background: rgba(128,128,128,.13); }
+.var-block[data-depth="4"] { margin-left: 26px; background: rgba(128,128,128,.16); }
+
+/* комментарии и длинные ходы переносятся, не уходя за панель */
+.movelist { overflow-wrap: anywhere; }
+.movelist .move, .movelist .move-comment { overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
+.move-comment { white-space: pre-wrap; }
+.var-block { min-width: 0; }

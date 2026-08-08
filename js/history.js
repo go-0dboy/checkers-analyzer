@@ -199,11 +199,14 @@ export class GameHistory {
   /** Нужен ли номер: белым всегда; чёрным — только если это первый ход последовательности. */
   _needsNumber(ply, isFirst) { return ply % 2 === 0 || isFirst; }
 
-  _renderContinuation(parent, ply, out, depth, isFirst) {
+  _renderContinuation(parent, ply, out, depth, startsLine) {
     if (parent.children.length === 0) return;
     const main = parent.children[0];
+    const hasVars = parent.children.length > 1;
+    // ход, от которого начинается ветка, — всегда с начала строки
+    if (hasVars && !startsLine) out.appendChild(document.createElement('br'));
     this._renderComments(main, 'commentsBefore', out);
-    if (this._needsNumber(ply, isFirst)) out.appendChild(this._numSpan(ply));
+    if (this._needsNumber(ply, startsLine)) out.appendChild(this._numSpan(ply));
     out.appendChild(this._moveSpan(main));
     this._renderComments(main, 'commentsAfter', out);
     for (let i = 1; i < parent.children.length; i++) {
@@ -213,11 +216,12 @@ export class GameHistory {
       this._renderFrom(parent.children[i], ply, block, depth + 1);
       out.appendChild(block);
     }
-    this._renderContinuation(main, ply + 1, out, depth, false);
+    // после блоков веток магистраль продолжается с новой строки
+    this._renderContinuation(main, ply + 1, out, depth, hasVars);
   }
   _renderFrom(node, ply, out, depth) {
     this._renderComments(node, 'commentsBefore', out);
-    out.appendChild(this._numSpan(ply));
+    out.appendChild(this._numSpan(ply));   // первый ход ветки всегда с номером (N. / N...)
     out.appendChild(this._moveSpan(node));
     this._renderComments(node, 'commentsAfter', out);
     this._renderContinuation(node, ply + 1, out, depth, false);

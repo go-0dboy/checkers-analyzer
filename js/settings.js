@@ -7,21 +7,21 @@
 import { savePrefs, loadPrefs } from './storage.js';
 import { THEME_IDS, BOARD_IDS, updateThemeMenu, updateBoardMenu } from './themes.js';
 
-const DEFAULT_PANELS = { players: false, meta: true, notation: true, library: true, openings: true, gamesdb: true, setupTags: true, setupFen: true };
+const DEFAULT_PANELS = { players: false, notation: true, library: true, openings: true, gamesdb: true, setupTags: true, setupFen: true };
 export function getPanelPrefs() { const p = loadPrefs(); return Object.assign({}, DEFAULT_PANELS, p.panels || {}); }
 
-const DEFAULT_SIDES = { meta: 'left', notation: 'right', library: 'left', openings: 'left', gamesdb: 'right', setupTags: 'right' };
+const DEFAULT_SIDES = {notation: 'right', library: 'left', openings: 'left', gamesdb: 'right', setupTags: 'right' };
 export function getSidePrefs() { const p = loadPrefs(); return Object.assign({}, DEFAULT_SIDES, p.sides || {}); }
 
 const DEFAULT_ORDER = {
-  analyze: { meta: 0, library: 1, openings: 2, gamesdb: 3, notation: 0 },
+  analyze: {library: 1, openings: 2, gamesdb: 3, notation: 0 },
   setup:   { setupTags: 0 },
 };
 export function getOrderPrefs() {
   const p = loadPrefs(); const o = p.order || {};
   return { analyze: Object.assign({}, DEFAULT_ORDER.analyze, o.analyze || {}), setup: Object.assign({}, DEFAULT_ORDER.setup, o.setup || {}) };
 }
-const MODE_OF = { meta: 'analyze', notation: 'analyze', openings: 'analyze', library: 'analyze', gamesdb: 'analyze', setupTags: 'setup' };
+const MODE_OF = {notation: 'analyze', openings: 'analyze', library: 'analyze', gamesdb: 'analyze', setupTags: 'setup' };
 
 const DELAY_MIN = 100, DELAY_MAX = 1500, DELAY_STEP = 100, DELAY_DEF = 400;
 const clampDelay = (v) => { const n = Number(v); if (!Number.isFinite(n)) return DELAY_DEF; return Math.min(DELAY_MAX, Math.max(DELAY_MIN, Math.round(n / DELAY_STEP) * DELAY_STEP)); };
@@ -30,7 +30,7 @@ export function getAutoPrefs() { const p = loadPrefs(); return { move: p.autoMov
 const THEME_NAMES = { dark: 'Орех', light: 'Пергамент', forest: 'Изумруд', midnight: 'Полночь', stone: 'Камень', wine: 'Бордо', teal: 'Океан' };
 const BOARD_NAMES = { classic: 'Классика', marble: 'Мрамор', green: 'Сукно', cherry: 'Вишня', ocean: 'Океан', graphite: 'Графит', sand: 'Песок' };
 const PANEL_LABELS = {
-  players: 'Панель игроков', meta: 'Панель партии', notation: 'Панель нотации',
+  players: 'Панель игроков', notation: 'Панель нотации',
   openings: 'Панель дебютов', library: 'Панель библиотеки', gamesdb: 'База партий',
   setupTags: 'Панель тегов', setupFen: 'Панель FEN',
 };
@@ -62,8 +62,10 @@ export function initSettings() {
     savePrefs(cb.dataset.auto === 'move' ? { autoMove: cb.checked } : { autoCapture: cb.checked });
   }));
 
+  const PREF_DEFAULTS = { compact: true, gdbAutosave: false };
   modal.querySelectorAll('input[data-pref]').forEach((cb) => cb.addEventListener('change', () => {
     savePrefs({ [cb.dataset.pref]: cb.checked });
+    document.dispatchEvent(new CustomEvent('app:settings'));
   }));
 
   const delayRange = modal.querySelector('#auto-delay-range');
@@ -139,7 +141,7 @@ export function initSettings() {
     const sides = getSidePrefs(); const order = getOrderPrefs();
     const sortG = (keys, mode) => keys.slice().sort((a, b) => (order[mode][a] ?? 0) - (order[mode][b] ?? 0));
 
-    const aSide = ['meta', 'notation', 'openings', 'library', 'gamesdb'];
+    const aSide = ['notation', 'openings', 'library', 'gamesdb'];
     const aRight = sortG(aSide.filter((k) => (sides[k] || 'right') === 'right'), 'analyze');
     const aLeft = sortG(aSide.filter((k) => (sides[k] || 'right') === 'left'), 'analyze');
     let aHtml = buildRow('players', false, false);
@@ -164,7 +166,9 @@ export function initSettings() {
     modal.querySelectorAll('input[data-panel]').forEach((cb) => { cb.checked = !!panels[cb.dataset.panel]; });
     const ap = getAutoPrefs();
     modal.querySelectorAll('input[data-auto]').forEach((cb) => { cb.checked = cb.dataset.auto === 'move' ? ap.move : ap.capture; });
-    modal.querySelectorAll('input[data-pref]').forEach((cb) => { cb.checked = !!loadPrefs()[cb.dataset.pref]; });
+    modal.querySelectorAll('input[data-pref]').forEach((cb) => {
+      cb.checked = (loadPrefs()[cb.dataset.pref] ?? PREF_DEFAULTS[cb.dataset.pref] ?? false);
+    });
   }
 
   const open = () => { syncBoxes(); syncSpeed(); renderPanelRows(); refreshActive(); modal.hidden = false; };
