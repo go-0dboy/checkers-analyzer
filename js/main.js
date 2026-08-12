@@ -4,13 +4,14 @@
  * синхронизация панелей, маршрутизация меню/клавиатуры, раскладка колонок
  * (вкладки + сворачивание в рейки + компактный режим).
  */
+ 
 import {
   WHITE, BLACK, opposite,
   initialState, createState, cloneState,
   getLegalMoves, getMovesForPiece, getJumpSteps,
   getGameStatus, hasMandatoryCapture,
   colorOf, isKingPiece, pieceChar, moveToString, isDarkSquare,
-  sepForGameType, setCaptureSep, stateToFEN, SIZE, rankOf,
+  sepForGameType, setCaptureSep, stateToFEN, SIZE, rankOf, fenToState,
 } from './engine.js';
 import { BoardUI } from './board.js';
 import { GameHistory } from './history.js';
@@ -48,6 +49,7 @@ let activeHints = null;
 let pending = null;
 let gameHeaders = {};
 let pendingSave = null;
+let pasteMode = 'pdn';         // 'pdn' | 'fen' — что вставляет модалка
 let headersSnapshot = null;
 let setupBoard = null;
 let setupTurn = WHITE;
@@ -417,6 +419,35 @@ document.querySelectorAll('[data-turn-choice]').forEach((btn) => {
 $('#btn-setup-clear').addEventListener('click', () => { setupBoard = new Array(64).fill(null); syncSetup(); });
 $('#btn-setup-initial').addEventListener('click', () => { setupBoard = initialState().board.slice(); syncSetup(); });
 $('#btn-setup-svg').addEventListener('click', saveSetupSVG);
+
+/* ── загрузка FEN из буфера (режим расстановки) ── */
+$('#btn-setup-fen-load')?.addEventListener('click', loadFenFromClipboard);
+
+/** Строгая валидация и применение FEN к холсту. true только при успехе. */
+function applyFenText(text) {
+  const fen = String(text || '').trim();
+  if (!fen) return false; // пусто — ничего не трогаем
+  let st;
+  try { st = fenToState(fen); } catch { return false; } // не FEN — не трогаем
+  if (!st.board.some((p) => p)) return false; // FEN без шашек — не позиция
+  // применяем ТОЛЬКО после успешного разбора
+  setupBoard = st.board.slice();
+  setupTurn = st.turn;
+  document.querySelectorAll('[data-turn-choice]').forEach((b) => b.classList.toggle('active', b.dataset.turnChoice === setupTurn));
+  syncSetup();
+  showToast('Позиция загружена из FEN');
+  return true;
+}
+
+/** Сначала буфер обмена; если пусто / нет доступа / не FEN — окно вставки. */
+async function loadFenFromClipboard() {
+  let text = null;
+  try { text = await readTextFromClipboard(); } catch { text = null; }
+  text = (text || '').trim();
+  if (text && applyFenText(text)) return; // валидный FEN — применён
+  openPasteModal(text, 'fen'); // иначе — окно вставки/правки (доска не тронута)
+}
+
 $('#btn-setup-cancel').addEventListener('click', () => { gameHeaders = headersSnapshot ? { ...headersSnapshot } : {}; exitSetup(); });
 $('#btn-setup-apply').addEventListener('click', () => {
   const hasWhite = setupBoard.some((p) => p && colorOf(p) === WHITE);
@@ -518,9 +549,11 @@ function syncMetaPanel() {
 
 /* ── модалки ── */
 const modal = $('#pdn-modal'), pdnText = $('#pdn-text');
-function openPasteModal(prefill = '') {
-  $('#pdn-modal-title').textContent = 'Загрузка PDN';
-  pdnText.readOnly = false; pdnText.value = prefill; $('#pdn-apply').textContent = 'Загрузить';
+function openPasteModal(prefill = '', mode = 'pdn') {
+  pasteMode = mode;
+  $('#pdn-modal-title').textContent = mode === 'fen' ? 'Загрузка FEN' : 'Загрузка PDN';
+  pdnText.readOnly = false; pdnText.value = prefill;
+  $('#pdn-apply').textContent = mode === 'fen' ? 'Применить' : 'Загрузить';
   modal.classList.remove('closing'); modal.hidden = false;
   setTimeout(() => pdnText.focus(), 80);
 }
@@ -530,7 +563,15 @@ function closeModal() {
   setTimeout(() => { modal.classList.remove('closing'); modal.hidden = true; }, 170);
 }
 modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('[data-close]')) closeModal(); });
-$('#pdn-apply').addEventListener('click', () => { try { loadPDNText(pdnText.value); closeModal(); } catch (err) { showToast(err.message, 'error', 4200); } });
+
+$('#pdn-apply').addEventListener('click', () => {
+  if (pasteMode === 'fen') {
+    if (applyFenText(pdnText.value)) closeModal();
+    else showToast('Некорректный FEN — проверьте строку', 'error', 3600);
+    return;
+  }
+  try { loadPDNText(pdnText.value); closeModal(); } catch (err) { showToast(err.message, 'error', 4200); }
+});
 
 const saveModal = $('#save-modal');
 const saveVal = (name) => $(`#save-f-${name}`).value.trim();
