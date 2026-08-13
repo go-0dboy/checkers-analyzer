@@ -330,12 +330,7 @@
       
       <section class="panel analysis-panel" id="analysis-panel">
         <header class="panel-head"><h2>Анализ</h2><span class="panel-hint">локальный движок</span></header>
-        <div class="notation-toolbar">
-          <select id="ai-depth" class="gdb-base-select" title="Глубина расчёта">
-            <option value="4">быстро</option><option value="6" selected>средне</option><option value="8">глубоко</option>
-          </select>
-          <button class="nt-btn active" id="ai-toggle" title="Включить/выключить анализ">⏻</button>
-        </div>
+        
         <div class="analysis-body" id="analysis-body"></div>
       </section>
       
@@ -457,11 +452,24 @@
           </div>
         </section>
         
-        <section class="set-section">
+<section class="set-section">
   <h4>Анализ</h4>
-  <label class="set-check"><input type="checkbox" data-pref="analysisOn"> Включить анализ</label>
-  <label class="set-check"><input type="checkbox" data-pref="aiArrow"> Стрелка лучшего хода на доске</label>
-  <label class="set-check"><input type="checkbox" data-pref="aiKnowledge"> Учитывать дебютную книгу и статистику</label>
+  <label class="set-check"><input type="checkbox" data-pref="analysisOn"> Включить анализ позиции</label>
+  <label class="set-check"><input type="checkbox" data-pref="aiKnowledge"> Использовать дебютную книгу и базу партий</label>
+  <div class="set-row">
+    <span class="set-speed-label">Глубина расчёта</span>
+    <span class="seg" id="ai-depth-seg">
+      <button type="button" data-depth="4">быстро</button>
+      <button type="button" data-depth="6">средне</button>
+      <button type="button" data-depth="8">глубоко</button>
+      <span class="seg-dot"></span>
+    </span>
+  </div>
+  <div class="set-speed">
+    <div class="set-speed-head"><span class="set-speed-label">Ресурс расчёта</span><span class="set-speed-val" id="ai-time-val">1.2 с</span></div>
+    <input type="range" class="set-range" id="ai-time-range" min="300" max="4000" step="100">
+    <div class="set-hint" id="ai-time-hint"></div>
+  </div>
 </section>
 
         <section class="set-section">

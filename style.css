@@ -849,3 +849,18 @@ body.compact .col-tab { padding: .3rem .55rem; }
 @media (max-width: 400px) {
   .ai-pv { display: none; }
 }
+
+/* ── расстановка: FEN переносится, не растягивает макет ── */
+.setup-panel, .setup-bar, .setup-fen-bar { min-width: 0; max-width: 100%; }
+@media (max-width: 920px) {
+  .app { grid-template-columns: minmax(0, 1fr); }   /* было 1fr — тянулось по контенту */
+  .setup-fen-bar { flex-wrap: wrap; }
+  .sfen-text { white-space: normal; word-break: break-all; text-overflow: clip; }
+}
+/* ── сегмент-контрол глубины с бегущей точкой ── */
+.seg { position: relative; display: inline-flex; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 0 0 7px; }
+.seg button { flex: 1 1 auto; background: none; border: none; cursor: pointer; color: var(--text-faint); font-size: .72rem; font-weight: 700; letter-spacing: .03em; padding: .45rem .8rem .15rem; transition: color .15s; }
+.seg button.active { color: var(--accent-2); }
+.seg-dot { position: absolute; bottom: 2.5px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); transform: translateX(-50%); transition: left .25s cubic-bezier(.3, 1.4, .5, 1); }
+.set-hint { font-size: .68rem; color: var(--text-faint); margin-top: .35rem; line-height: 1.45; }
+.set-hint.warn { color: var(--danger); }

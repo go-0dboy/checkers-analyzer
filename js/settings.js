@@ -62,6 +62,45 @@ export function initSettings() {
   modal.querySelectorAll('input[data-auto]').forEach((cb) => cb.addEventListener('change', () => {
     savePrefs(cb.dataset.auto === 'move' ? { autoMove: cb.checked } : { autoCapture: cb.checked });
   }));
+  
+  /* ── анализ: сегмент глубины + ползунок ресурса ── */
+  const seg = modal.querySelector('#ai-depth-seg');
+  const segDot = seg?.querySelector('.seg-dot');
+  function syncSeg() {
+    if (!seg) return;
+    const d = String(loadPrefs().analysisDepth || 6);
+    const btns = [...seg.querySelectorAll('button[data-depth]')];
+    let idx = btns.findIndex((b) => b.dataset.depth === d); if (idx < 0) idx = 1;
+    btns.forEach((b, i) => b.classList.toggle('active', i === idx));
+    if (segDot) segDot.style.left = ((idx + 0.5) * 100 / btns.length) + '%';
+  }
+  seg?.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-depth]'); if (!b) return;
+    savePrefs({ analysisDepth: b.dataset.depth });
+    syncSeg();
+    document.dispatchEvent(new CustomEvent('app:settings'));
+  });
+  const aiRange = modal.querySelector('#ai-time-range');
+  const aiVal = modal.querySelector('#ai-time-val');
+  const aiHint = modal.querySelector('#ai-time-hint');
+  function syncAiTime() {
+    if (!aiRange) return;
+    const t = Number(loadPrefs().aiTime) || 1200;
+    aiRange.value = t;
+    if (aiVal) aiVal.textContent = (t / 1000).toFixed(1) + ' с';
+    if (aiHint) {
+      aiHint.textContent = t >= 2500
+        ? '⚠ высокая точность: заметная нагрузка на CPU и батарею, особенно на телефоне'
+        : t >= 1500 ? 'умеренное потребление ресурсов' : 'экономный режим: минимальная нагрузка, но движок видит меньше продолжений';
+      aiHint.classList.toggle('warn', t >= 2500);
+    }
+  }
+  aiRange?.addEventListener('input', () => {
+    savePrefs({ aiTime: Number(aiRange.value) });
+    syncAiTime();
+    document.dispatchEvent(new CustomEvent('app:settings'));
+  });
+  
 
   const PREF_DEFAULTS = { compact: true, gdbAutosave: false };
   modal.querySelectorAll('input[data-pref]').forEach((cb) => cb.addEventListener('change', () => {
@@ -172,7 +211,7 @@ export function initSettings() {
     });
   }
 
-  const open = () => { syncBoxes(); syncSpeed(); renderPanelRows(); refreshActive(); modal.hidden = false; };
+  const open = () => { syncSeg(); syncAiTime(); syncBoxes(); syncSpeed(); renderPanelRows(); refreshActive(); modal.hidden = false; };
   const close = () => { modal.hidden = true; };
 
   gear.addEventListener('click', (e) => { e.stopPropagation(); open(); });

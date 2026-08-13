@@ -1,17 +1,16 @@
 /**
  * @module ai
- * Движок русских шашек, уровень 6.
+ * Движок русских шашек, уровень 8.
  * Оценка: материал + мобильность + связность/изоляция/запертость + аванпосты +
- *         анти-разменный bias + ничейная шкала + эндшпильные знания +
- *         гашение чисто-дамочных окончаний.
- * Поиск: PVS + TT(границы+TT-ход) + killer + history + LMR + null-move + futility +
- *        quiescence + детектор повторов + ПРАВИЛО НИЧЬЕЙ ПО ТИХИМ ХОДАМ (30) +
- *        итеративное углубление с aspiration + ЭНДШПИЛЬ-ОРАКУЛ (≤4–6 фигур).
- * Знания (extra: book/stats) влияют на порядок ходов в корне.
+ *         ПРОХОДНЫЕ + БОРТОВЫЕ штраф + КЛЮЧЕВЫЕ c5/f4 + анти-разменный bias +
+ *         ничейная шкала + эндшпиль-знания + гашение дамочных.
+ * Поиск: PVS + TT + killer + history + LMR + quiescence + продвиженческое расширение +
+ *        повторы + правило тихих ходов + итеративное углубление + aspiration.
+ * Грейд хода считается тем же analyze() → цифры согласованы с панелью.
  */
-import { WHITE, getLegalMoves, makeMove, getGameStatus, colorOf, isKingPiece, fileOf, rankOf, moveToString, stateToFEN } from './engine.js';
+import { WHITE, getLegalMoves, makeMove, getGameStatus, colorOf, isKingPiece, isManPiece, fileOf, rankOf, moveToString, stateToFEN } from './engine.js';
 
-const MAN = 100, KING = 330, MATE = 100000, QDEPTH = 4, QUIET_DRAW = 30;
+const MAN = 100, KING = 330, MATE = 100000, QDEPTH = 4, QUIET_DRAW = 30, TT_MAX = 300000;
 let nodes = 0, deadline = 0;
 const tt = new Map();
 const hist = new Map();
@@ -22,10 +21,33 @@ const centerish = (i) => { const f = fileOf(i), r = rankOf(i); return f >= 2 && 
 const longDiag = (i) => fileOf(i) === rankOf(i) || fileOf(i) + rankOf(i) === 7;
 const inB = (f, r) => f >= 0 && f < 8 && r >= 0 && r < 8;
 let boardRef = null;
+
+/* ── позиционные таблицы (теория русских шашек) ──
+   Центр значительно сильнее борта; «золотые» поля d4/f4/c5/e5;
+   отсталые a1/h2 (у чёрных h8/a7) слабы, пока не развиты. */
+const sq = (f, r) => r * 8 + f;
+const GOLD_W = new Set([sq(3, 3), sq(5, 3), sq(2, 4), sq(4, 4)]); // d4 f4 c5 e5
+const CENTER_W = new Set([sq(2, 2), sq(4, 2), sq(3, 1), sq(5, 1)]); // c3 e3 d2 f2
+const GOLD_B = new Set([sq(3, 4), sq(5, 4), sq(2, 3), sq(4, 3)]); // d5 f5 c4 e4
+const CENTER_B = new Set([sq(2, 5), sq(4, 5), sq(3, 6), sq(5, 6)]); // c6 e6 d7 f7
+const BACKWARD_W = new Set([sq(0, 0), sq(7, 1)]); // a1 h2
+const BACKWARD_B = new Set([sq(7, 7), sq(0, 6)]); // h8 a7
+
 function friendlyAt(f, r, color) { return inB(f, r) && boardRef[r * 8 + f] && colorOf(boardRef[r * 8 + f]) === color; }
 function pieceCount(state) { let t = 0; for (const p of state.board) if (p) t++; return t; }
+function passedMan(state, i, w) {
+  const f = fileOf(i), r = rankOf(i), step = w ? 1 : -1, enemy = w ? 'b' : 'w';
+  for (const df of [-1, 1]) {
+    let nf = f + df, nr = r + step;
+    while (inB(nf, nr)) {
+      const p = state.board[nr * 8 + nf];
+      if (p && colorOf(p) === enemy && isManPiece(p)) return false;
+      nf += df; nr += step;
+    }
+  }
+  return true;
+}
 
-/** Оценка с позиции белых. */
 export function evaluate(state) {
   boardRef = state.board;
   let s = 0, total = 0, wMen = 0, bMen = 0, wK = 0, bK = 0, matW = 0;
@@ -40,33 +62,31 @@ export function evaluate(state) {
     } else {
       w ? wMen++ : bMen++;
       matW += w ? MAN : -MAN;
-      let v = MAN + adv * 5 + (centerish(i) ? 8 : 0);
-      if (total > 10 && adv === 0) v += 4;
-      if (total <= 8) v += adv * 2;
+      let v = MAN + adv * 3;
+      // ценность поля: золотой центр > расширенный центр > борт
+      if (w ? GOLD_W.has(i) : GOLD_B.has(i)) v += 12;
+      else if (w ? CENTER_W.has(i) : CENTER_B.has(i)) v += 6;
+      if (f === 0 || f === 7) v -= 6;                                   // бортовая слаба
+      if ((w ? BACKWARD_W.has(i) : BACKWARD_B.has(i)) && total > 16) v -= 3; // отсталая
       const bd = w ? -1 : 1;
       const sup = friendlyAt(f - 1, r + bd, w ? WHITE : 'b') || friendlyAt(f + 1, r + bd, w ? WHITE : 'b');
       const anyNb = sup || friendlyAt(f - 1, r - bd, w ? WHITE : 'b') || friendlyAt(f + 1, r - bd, w ? WHITE : 'b');
-      if (sup) v += 4; else if (!anyNb) v -= 6;
+      if (sup) v += 4; else if (!anyNb) v -= 6;                          // связность/тандем
       const fw = w ? 1 : -1;
       if (friendlyAt(f - 1, r + fw, w ? WHITE : 'b') && friendlyAt(f + 1, r + fw, w ? WHITE : 'b')) v -= 6;
-      if (centerish(i) && adv >= 4) v += 6;
+      if (total <= 12 && passedMan(state, i, w)) v += (total <= 8 ? 12 : 5);
       s += w ? v : -v;
     }
   }
   const totalMen = wMen + bMen;
   if (matW > 0) s += totalMen * 3; else if (matW < 0) s -= totalMen * 3;
   if (total <= 6 && Math.abs(matW) <= MAN) s = Math.round(s * 0.6);
-  // чисто-дамочный эндшпиль: гасим оценку, если нет решающего перевеса по дамка
-  if (totalMen === 0) {
-    const kd = Math.abs(wK - bK);
-    const cap = kd >= 2 ? 300 : 60;
-    s = Math.sign(s) * Math.min(Math.abs(s), cap);
-  }
   s += endgameKnowledge(total, matW, wMen, bMen, wK, bK);
   const mob = getLegalMoves(state).length;
   s += (state.turn === WHITE ? 1 : -1) * mob * 2;
   return s;
 }
+
 function endgameKnowledge(total, matW, wMen, bMen, wK, bK) {
   if (total > 6) return 0;
   let b = 0;
@@ -109,11 +129,12 @@ function orderMoves(moves, ttMove, ply) {
   moves.sort((a, b) => b._s - a._s);
 }
 
-/** quiet — полуходы без взятий и ходов шашек; >= QUIET_DRAW → ничья. */
 function pvs(state, depth, alpha, beta, ply, quiet) {
   nodes++;
   if ((nodes & 127) === 0 && Date.now() > deadline) throw 0;
-  if (getGameStatus(state).over) return -(MATE + depth);
+// матовая оценка + микродобавка материала: среди ходов с одинаковым сроком
+// мата сторона предпочтёт НЕ отдавать шашки (b4-c3 вместо h4-g3)
+if (getGameStatus(state).over) return -(MATE + depth) + materialSide(state) * 0.001;
   if (quiet >= QUIET_DRAW) return 0;
   const key = stateToFEN(state);
   const seen = pathMap.get(key) || 0;
@@ -134,11 +155,6 @@ function pvs(state, depth, alpha, beta, ply, quiet) {
     const total = pieceCount(state);
     const movesAll = getLegalMoves(state);
     const forcedCap = movesAll.length && movesAll[0].isCapture;
-    if (depth >= 3 && !forcedCap && total > 6 && ply > 0) {
-      const ns = { board: state.board, turn: state.turn === WHITE ? 'b' : 'w', plies: state.plies + 1 };
-      const v = -pvs(ns, depth - 3, -beta, -beta + 1, ply + 1, quiet + 1);
-      if (v >= beta) return beta;
-    }
     orderMoves(movesAll, ttMove, ply);
     const a0 = alpha; let best = -Infinity, bestMove = movesAll[0];
     const futility = depth <= 2 && total > 6 && !forcedCap && evalForSide(state) + 150 < alpha;
@@ -147,11 +163,16 @@ function pvs(state, depth, alpha, beta, ply, quiet) {
       const m = movesAll[i];
       if (futility && !m.isCapture && i >= 4) continue;
       legal++;
-      const manMoved = !isKingPiece(state.board[m.from]);
-      const nq = (m.isCapture || manMoved) ? 0 : quiet + 1;
-      let d = depth - 1;
-      if (i >= 4 && depth >= 3 && !m.isCapture) d -= 1;
-      let v;
+      const piece = state.board[m.from];
+const promotes = m.king && isManPiece(piece);
+const manMoved = !m.isCapture && isManPiece(piece);
+const nq = (m.isCapture || manMoved) ? 0 : quiet + 1;
+// тактическое расширение: взятия и превращения считаем на ply глубже
+const ext = (m.isCapture || promotes) ? 1 : 0;
+let d = depth - 1 + ext;
+if (d > depth) d = depth;
+if (i >= 4 && depth >= 3 && !m.isCapture && !promotes) d -= 1;
+let v;
       if (legal === 1) v = -pvs(makeMove(state, m), d, -beta, -alpha, ply + 1, nq);
       else {
         v = -pvs(makeMove(state, m), d, -alpha - 1, -alpha, ply + 1, nq);
@@ -221,76 +242,76 @@ function pvLine(state, first, depth) {
   return pv.join(' ');
 }
 
-/** Практическая надбавка: книжный ход и исторически успешные ходы. */
 function knowledgeBonus(m, extra) {
   if (!extra) return 0;
   let b = 0;
-  if ((extra.book || []).some((x) => x.from === m.from && x.to === m.to)) b += 30; // ход из дебютной книги
+  if ((extra.book || []).some((x) => x.from === m.from && x.to === m.to)) b += 20; // ход из книги
   const s = (extra.stats || []).find((x) => x.from === m.from && x.to === m.to);
   if (s && s.total >= 3) {
-    const conf = Math.min(1, s.total / 12);                 // доверие по объёму выборки
-    b += Math.round(20 * conf * ((s.w / s.total) - 0.5) * 2); // −20..+20 по проценту побед
+    const conf = Math.min(1, s.total / 20);
+    const rate = (s.w + 0.5 * s.d) / s.total; // очковость: ничья = пол-очка
+    b += Math.round(15 * conf * (rate - 0.5) * 2); // ±15, надёжные ничейные ходы ≈ 0
   }
   return b;
 }
 
-export function analyze(state, { maxDepth = 10, timeMs = 1200 } = {}, extra = null) {
+export function analyze(state, { depth, maxDepth, timeMs = 1200 } = {}, extra = null) {
+  const t0 = Date.now();
   const st = getGameStatus(state);
   if (st.over) return { over: true, winner: st.winner, scoreWhite: st.winner === null ? 0 : (st.winner === WHITE ? 999 : -999), lines: [], depth: 0, nodes: 0 };
-  tt.clear(); hist.clear(); killers = []; pathMap.clear();
+  if (tt.size > TT_MAX) tt.clear();
   const total = pieceCount(state);
-  const top = Math.min((maxDepth || 10) + (total <= 6 ? 4 : 0) + (total <= 4 ? 6 : 0), 30);
-  const budget = timeMs + (total <= 6 ? 500 : 0) + (total <= 4 ? 700 : 0);
-  let prev = 0, res = null, finalDepth = 0, prior = null;
+  const top = Math.min((maxDepth || (depth ? depth + 4 : 12)) + (total <= 6 ? 4 : 0) + (total <= 4 ? 4 : 0), 34);
+  const budget = timeMs;
+  let prev = 0, res = null, finalDepth = 0, prior = null, totalNodes = 0;
   for (let d = 2; d <= top; d += 2) {
-    nodes = 0; deadline = Date.now() + budget;
+    nodes = 0;
+    deadline = Date.now() + Math.max(150, budget - (Date.now() - t0));
     const priorMap = prior ? new Map(prior.map((r) => [r.move.from * 64 + r.move.to, r.score])) : null;
-    let win = 60, out = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      out = searchRoot(state, d, extra, priorMap, prev - win, prev + win);
-      if (out.aborted) break;
-      if (out.failLow) out = searchRoot(state, d, extra, priorMap, -Infinity, prev + win);
-      else if (out.failHigh) out = searchRoot(state, d, extra, priorMap, prev - win, Infinity);
-      if (!out.failLow && !out.failHigh) break;
-      win *= 4;
-    }
-    if (out && !out.aborted && out.res.length) { res = out.res; finalDepth = d; prior = out.res; prev = out.best; }
-    if (Date.now() > deadline || (out && out.aborted)) break;
+    const out = searchRoot(state, d, extra, priorMap);
+    totalNodes += nodes;
+    // доверяем только ПОЛНОЙ итерации; частичная (abort) не меняет лучший ход
+    if (!out.aborted && out.res.length) { res = out.res; finalDepth = d; prior = out.res; prev = out.best; }
+    if (out.aborted || (Date.now() - t0) >= budget) break;
   }
-  if (!res) res = searchRoot(state, 2, extra, null).res;
-  // знания влияют на РЕКОМЕНДАЦИИ: надбавка к счёту и пересортировка
-  if (extra) {
-    for (const r of res) r.score += knowledgeBonus(r.move, extra);
-    res.sort((a, b) => b.score - a.score);
-  }
+  if (!res) { res = searchRoot(state, 2, extra, null).res; totalNodes += nodes; }
+  if (extra) { for (const r of res) r.score += knowledgeBonus(r.move, extra); res.sort((a, b) => b.score - a.score); }
   const toWhite = state.turn === WHITE ? (x) => x : (x) => -x;
   return {
     over: false,
     scoreWhite: toWhite(res[0]?.score ?? 0),
     lines: res.slice(0, 3).map((r) => ({ san: moveToString(r.move), move: r.move, scoreWhite: toWhite(r.score), pv: pvLine(state, r.move, 4) })),
-    depth: finalDepth, nodes,
+    depth: finalDepth, nodes: totalNodes,
   };
 }
 
-export function gradeMove(before, after, { depth = 6, timeMs = 700 } = {}) {
-  tt.clear(); hist.clear(); killers = []; pathMap.clear(); nodes = 0; deadline = Date.now() + timeMs;
-  const b = searchRoot(before, depth, null, null);
-  const best = b.res?.[0]?.score ?? 0, bestSan = b.res?.[0] ? moveToString(b.res[0].move) : '';
-  tt.clear(); hist.clear(); killers = []; pathMap.clear(); nodes = 0; deadline = Date.now() + timeMs;
-  const a = searchRoot(after, depth, null, null);
-  const played = -(a.res?.[0]?.score ?? 0);
-  const isMate = (s) => Math.abs(s) > 90000;
+/** Грейд хода через тот же analyze() → согласован с панелью анализа. */
+export function gradeMove(before, after, { depth = 6, timeMs = 700 } = {}, extra = null) {
+  const opts = { depth, timeMs };
+  const b = analyze(before, opts, extra);
+  const a = analyze(after, opts, extra);
+  const sB = b.scoreWhite, sA = a.scoreWhite;
+  const isMateS = (x) => Math.abs(x) > 90000;
+  const moverWin = (x) => before.turn === WHITE ? x > 90000 : x < -90000;
   let loss;
-  if (isMate(best) || isMate(played)) {
-    if (isMate(best) && isMate(played) && Math.sign(best) === Math.sign(played)) loss = 0;
-    else if (isMate(best) && !isMate(played)) loss = 400;
-    else if (!isMate(best) && isMate(played)) loss = 0;
-    else loss = Math.sign(best) !== Math.sign(played) ? 400 : 0;
-  } else loss = best - played;
+  if (isMateS(sB) || isMateS(sA)) {
+    loss = (moverWin(sB) && !moverWin(sA)) ? 400 : 0;   // упустил/сохранил форсированный выигрыш
+  } else {
+    loss = before.turn === WHITE ? (sB - sA) : (sA - sB);
+  }
+  loss = Math.max(0, Math.round(loss));
+  const bestSan = b.lines?.[0]?.san || '';
   let label, cls;
   if (loss <= 15) { label = 'сильный ход'; cls = 'good'; }
   else if (loss <= 40) { label = 'нормальный ход'; cls = 'ok'; }
   else if (loss <= 90) { label = 'слабый ход'; cls = 'bad'; }
   else { label = 'зевок'; cls = 'blunder'; }
   return { loss, label, cls, bestSan };
+}
+
+/** Материал с точки зрения стороны, которой ходить (без мобильности/позиции). */
+function materialSide(state) {
+  let s = 0;
+  for (const p of state.board) if (p) { const v = isKingPiece(p) ? 330 : 100; s += colorOf(p) === WHITE ? v : -v; }
+  return (state.turn === WHITE ? 1 : -1) * s;
 }

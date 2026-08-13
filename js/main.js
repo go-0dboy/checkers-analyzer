@@ -136,6 +136,7 @@ function applyModeVisibility() {
     'library-panel': !setup && show.library,
     'openings-panel': !setup && show.openings,
     'gamesdb-panel': !setup && show.gamesdb,
+    'analysis-panel': !setup && show.analysis !== false,
   };
   for (const [id, v] of Object.entries(vis)) {
     const el = document.getElementById(id); if (!el) continue;
@@ -150,7 +151,6 @@ function applyModeVisibility() {
   $('#player-bottom').hidden = setup || !show.players;
   $('#controls').hidden = setup;
   document.body.classList.toggle('compact', loadPrefs().compact !== false);
-  $('#analysis-panel').hidden   = setup || !show.analysis;
   applyLayout();
 }
 
@@ -205,7 +205,7 @@ function wireColumnTabs() {
     col?.addEventListener('click', (e) => {
       if (e.target.closest('[data-collapse]')) { col.classList.toggle('collapsed'); applyLayout(); return; }
       const t = e.target.closest('.col-tab');
-      if (t) { col.classList.remove('collapsed'); col.dataset.activeTab = t.dataset.tab; applyLayout(); }
+      if (t) { col.classList.remove('collapsed'); col.dataset.activeTab = t.dataset.tab; applyLayout(); scheduleAnalysis(); }
     });
   }
 }
@@ -794,6 +794,7 @@ window.addEventListener('keydown', (e) => {
 
 /* ── ИИ-анализ (локальный движок в воркере, устойчивый к ошибкам) ── */
 let aiWorker = null, aiSeq = 0, aiTimer = null, aiWatchdog = null, pendingFen = null;
+let aiPending = 0;   // сколько сообщений ещё считает воркер
 const lastAi = { result: null, grade: null, book: [], stats: [] };
 function ensureAi() {
   if (aiWorker !== null) return aiWorker;
@@ -807,13 +808,17 @@ function ensureAi() {
 function onAi(e) {
   const { id, result, grade, error } = e.data || {};
   if (id !== aiSeq) return;
-  clearTimeout(aiWatchdog);
-  if (error) { console.warn('ai:', error); lastAi.result = null; renderAnalysis(); return; }
+  if (error) {
+    console.warn('ai:', error);
+    lastAi.result = null;
+    lastAi.grade = null;
+    renderAnalysis();
+    return;
+  }
   if (result) { lastAi.result = result; lastAi.fen = pendingFen; }
   if (grade !== undefined) lastAi.grade = grade;
   renderAnalysis();
-}
-function scheduleAnalysis() { clearTimeout(aiTimer); aiTimer = setTimeout(doAnalysis, 250); }
+}function scheduleAnalysis() { clearTimeout(aiTimer); aiTimer = setTimeout(doAnalysis, 250); }
 
 function collectKnowledge(fen) {
   try {
@@ -832,6 +837,8 @@ function doAnalysis() {
   if (!body || mode === 'setup' || $('#analysis-panel')?.hidden || loadPrefs().analysisOn === false) return;
   aiSeq++;
   const id = aiSeq, depth = Number(loadPrefs().analysisDepth) || 6;
+  const timeMs = Number(loadPrefs().aiTime) || (depth <= 4 ? 500 : depth <= 6 ? 1200 : 2500);
+  
   const state = history.currentState, parent = history.current.parent;
   body.innerHTML = '<div class="lib-empty">Считаем…</div>';
 
@@ -852,15 +859,19 @@ function doAnalysis() {
   lastAi.book = extra?.book || [];
   lastAi.stats = extra?.stats || [];
 
-  if (ensureAi()) {
+if (ensureAi()) {
+    // воркер ещё считает прежний расчёт — убиваем и стартуем заново,
+    // иначе новый запрос будет стоять в очереди и панель покажет старое
+    if (aiPending > 0) { aiWorker.terminate(); aiWorker = null; aiPending = 0; ensureAi(); }
     pendingFen = stateToFEN(state);
-    aiWorker.postMessage({ id, type: 'analyze', state, opts: { depth, timeMs: 900 }, extra });
-    aiWorker.postMessage({ id, type: 'grade', before: parent?.state ?? state, after: state, opts: { depth, timeMs: 700 } });
+    aiPending += 2;
+    aiWorker.postMessage({ id, type: 'analyze', state, opts: { depth, timeMs } , extra });
+    aiWorker.postMessage({ id, type: 'grade', before: parent?.state ?? state, after: state, opts: { depth, timeMs: 700 }, extra });
     if (!parent) lastAi.grade = null;
-  } else {
+  } else { 
     import('./ai.js').then((ai) => {
       lastAi.result = ai.analyze(state, { depth: 4, timeMs: 400 }, extra);
-      lastAi.grade = parent ? ai.gradeMove(parent.state, state, { depth: 4, timeMs: 300 }) : null;
+      lastAi.grade = parent ? ai.gradeMove(parent.state, state, { depth: 4, timeMs: 300 }, extra) : null;
       renderAnalysis();
     });
   }
@@ -887,9 +898,7 @@ function renderAnalysis() {
   const mb = (lastAi.book || []).find((b) => b.from === l.move.from && b.to === l.move.to);
   const ms = (lastAi.stats || []).find((s) => s.from === l.move.from && s.to === l.move.to);
   const badges = (mb ? `<span class="ai-badge book" title="Дебют: ${esc(mb.name)}">${esc(mb.name)}</span>` : '') +
-    (ms ? `<span class="ai-badge stat" title="В базах партий: ${ms.total} (${ms.w}–${ms.d}–${ms.l})">` +
-      `<span class="stat-full">${ms.total}·${ms.w}–${ms.d}–${ms.l}</span>` +
-      `<span class="stat-short">${ms.total}·${Math.round((ms.w / ms.total) * 100)}%</span></span>` : '');
+    (ms ? `<span class="ai-badge stat" title="В базах: ${ms.total} партий (${ms.w}–${ms.d}–${ms.l})">${ms.total}·${Math.round(((ms.w + 0.5 * ms.d) / ms.total) * 100)}%</span>` : '');
   return `<div class="ai-line" data-ai="${i}" title="Сыграть ход ${l.san}">` +
     `<span class="ai-n">${i + 1}.</span><b class="ai-mv">${l.san}</b><span class="ai-ls">${fmtScore(l.scoreWhite)}</span>` +
     `<span class="ai-sub">${badges}<span class="ai-pv">${l.pv}</span></span></div>`;
@@ -899,14 +908,6 @@ function renderAnalysis() {
   drawAiArrow();
 }
 
-$('#ai-toggle')?.addEventListener('click', () => {
-  const on = loadPrefs().analysisOn !== false;
-  savePrefs({ analysisOn: !on });
-  $('#ai-toggle').classList.toggle('active', !on);
-  if (!on) { lastAi.result = null; lastAi.grade = null; }
-  doAnalysis();
-});
-$('#ai-depth')?.addEventListener('change', (e) => { savePrefs({ analysisDepth: e.target.value }); doAnalysis(); });
 $('#analysis-body')?.addEventListener('click', (e) => {
   const line = e.target.closest('.ai-line[data-ai]'); if (!line) return;
   const l = lastAi.result?.lines?.[Number(line.dataset.ai)];
@@ -962,8 +963,6 @@ window.addEventListener('resize', () => drawAiArrow());
   idbSeedIfEmpty();
   bindThemePickers();
   initSettings();
-  $('#ai-toggle')?.classList.toggle('active', loadPrefs().analysisOn !== false);
-  $('#ai-depth') && ($('#ai-depth').value = String(loadPrefs().analysisDepth || 6));
   wireColumnTabs();
   applyLayout();
   initOpeningsUI({ history });
