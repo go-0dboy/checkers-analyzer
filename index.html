@@ -474,6 +474,34 @@
   </div>
 </section>
 
+<section class="set-section">
+  <h4>Обучение оценки</h4>
+  <div class="set-grid">
+    <button type="button" class="set-opt" id="train-run">Учиться на библиотеке</button>
+    <button type="button" class="set-opt" id="train-self">Самоигра</button>
+    <button type="button" class="set-opt" id="train-pause">Пауза</button>
+    <button type="button" class="set-opt" id="train-reset">Сброс</button>
+    <button type="button" class="set-opt" id="train-export">В файл</button>
+    <label class="set-opt">Импорт<input type="file" id="train-import" accept=".json" hidden></label>
+  </div>
+  <div class="set-hint" id="train-status">веса: стандартные</div>
+</section>
+
+        <section class="set-section">
+          <h4>Эндшпильная база</h4>
+          <div class="set-row">
+            <span class="set-speed-label">Фигур</span>
+            <select id="tb-k" class="gdb-base-select"><option value="2">2</option><option value="3" selected>3</option><option value="4">4 (эксперимент)</option></select>
+          </div>
+          <div class="set-grid">
+            <button type="button" class="set-opt" id="tb-run">Рассчитать</button>
+            <button type="button" class="set-opt" id="tb-pause">Пауза</button>
+            <button type="button" class="set-opt" id="tb-export">В файл</button>
+            <label class="set-opt">Импорт<input type="file" id="tb-import" accept=".json" hidden></label>
+          </div>
+          <div class="set-hint" id="tb-status">база пуста</div>
+        </section>
+
         <section class="set-section">
           <h4>Панели · анализ партии</h4>
           <div id="set-analyze-rows"></div>

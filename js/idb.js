@@ -11,7 +11,7 @@
  * при отсутствии манифеста используются games.json / openings.json.
  */
 const DB_NAME = 'checkers-analyzer';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let dbPromise = null;
 
 export function idb() {
@@ -23,6 +23,7 @@ export function idb() {
         if (!db.objectStoreNames.contains('libraryGames')) db.createObjectStore('libraryGames', { keyPath: 'id', autoIncrement: true });
         if (!db.objectStoreNames.contains('openings')) db.createObjectStore('openings', { keyPath: 'id', autoIncrement: true });
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('tb')) db.createObjectStore('tb', { keyPath: 'key' });
       };
       rq.onsuccess = () => resolve(rq.result);
       rq.onerror = () => reject(rq.error);

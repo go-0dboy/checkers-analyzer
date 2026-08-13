@@ -23,11 +23,11 @@ import {
 import { THEME_IDS, BOARD_IDS, bindThemePickers, updateThemeMenu, updateBoardMenu, closeThemeMenu, closeBoardMenu } from './themes.js';
 import { showToast } from './toast.js';
 import { saveSetupSVG } from './export.js';
-import { initLibraryUI, getLibraryStats } from './library.js';
+import { initLibraryUI, getLibraryStats, sampleGames } from './library.js';
 import { initSettings, getPanelPrefs, getSidePrefs, getOrderPrefs, getAutoPrefs } from './settings.js';
 import { initOpeningsUI, getOpeningBook } from './openings.js';
 import { initGamesDBUI, addCurrentToDb, getGamesDbStats } from './gamesdb.js';
-import { idbSeedIfEmpty } from './idb.js';
+import { idbSeedIfEmpty, idbAll, idbBulkPut } from './idb.js';
 
 const $ = (sel) => document.querySelector(sel);
 const boardUI = new BoardUI({
@@ -801,7 +801,10 @@ function ensureAi() {
   try {
     aiWorker = new Worker('js/ai-worker.js', { type: 'module' });
     aiWorker.onmessage = onAi;
-    aiWorker.onerror = (e) => { console.warn('ai worker error:', e); aiWorker = false; };
+    aiWorker.onerror = () => { aiWorker = false; };
+    if (loadPrefs().aiWeights) aiWorker.postMessage({ cmd:'weights', weights: loadPrefs().aiWeights });
+    document.dispatchEvent(new CustomEvent('ai-ready'));
+    aiSendTB(true);
   } catch { aiWorker = false; }
   return aiWorker;
 }
@@ -865,12 +868,12 @@ if (ensureAi()) {
     if (aiPending > 0) { aiWorker.terminate(); aiWorker = null; aiPending = 0; ensureAi(); }
     pendingFen = stateToFEN(state);
     aiPending += 2;
-    aiWorker.postMessage({ id, type: 'analyze', state, opts: { depth, timeMs } , extra });
+    aiWorker.postMessage({ id, type: 'analyze', state, opts: { depth, timeMs, lines: 8 }, extra });
     aiWorker.postMessage({ id, type: 'grade', before: parent?.state ?? state, after: state, opts: { depth, timeMs: 700 }, extra });
     if (!parent) lastAi.grade = null;
   } else { 
     import('./ai.js').then((ai) => {
-      lastAi.result = ai.analyze(state, { depth: 4, timeMs: 400 }, extra);
+      lastAi.result = ai.analyze(state, { depth: 4, timeMs: 400, lines: 8 }, extra);
       lastAi.grade = parent ? ai.gradeMove(parent.state, state, { depth: 4, timeMs: 300 }, extra) : null;
       renderAnalysis();
     });
@@ -953,13 +956,133 @@ function drawAiArrow() {
 
 window.addEventListener('resize', () => drawAiArrow());
 
+/* ── эндшпильные базы: расчёт/пауза/сохранение/подключение ── */
+let tbWorker = null;                 // null — ещё не создан; false — недоступен
+const tbMain = new Map();
+const tbStatus = (t) => { const el = $('#tb-status'); if (el) el.textContent = t; };
+
+function onTb(e) {
+  const d = e.data || {};
+  if (d.chunk) {
+    for (const [k, v] of d.chunk) tbMain.set(k, v);
+    idbBulkPut('tb', d.chunk.map(([key, v]) => ({ key, v })));
+    if (aiWorker) aiWorker.postMessage({ cmd: 'tb-add', entries: d.chunk });
+    tbStatus(`расчёт… ${tbMain.size.toLocaleString()} позиций`);
+  }
+  if (d.progress != null) tbStatus(`${d.phase}… ${Math.round(d.progress * 100)}%`);
+  if (d.done) {
+    tbStatus(`готово · ${tbMain.size.toLocaleString()} позиций`);
+    const kSel = Number($('#tb-k')?.value || 0);
+    savePrefs({ tbDoneK: Math.max(loadPrefs().tbDoneK || 0, kSel) });
+  }
+}
+
+function ensureTB() {
+  if (tbWorker === false) return null;      // уже знаем, что недоступен
+  if (tbWorker) return tbWorker;
+  try {
+    const w = new Worker('js/tb-worker.js', { type: 'module' });
+    w.onmessage = onTb;
+    w.onerror = (e) => { console.warn('tb worker error:', e); tbWorker = false; };
+    tbWorker = w;
+  } catch (e) {
+    console.warn('tb worker init:', e);
+    tbWorker = false;
+    return null;
+  }
+  return tbWorker;
+}
+function aiSendTB() { if (aiWorker && tbMain.size) aiWorker.postMessage({ cmd: 'tb', entries: [...tbMain] }); }
+
+$('#tb-run')?.addEventListener('click', () => {
+  const k = Number($('#tb-k')?.value || 3);
+  if (k >= 4 && !confirm('4 фигуры — десятки миллионов позиций и сотни МБ памяти. Продолжить?')) return;
+  const w = ensureTB();
+  if (!w) { showToast('Расчёт баз недоступен в этом браузере', 'error'); return; }
+  w.postMessage({ cmd: 'load', entries: [...tbMain] });
+  w.postMessage({ cmd: 'run', k });
+  tbStatus('старт…');
+});
+$('#tb-pause')?.addEventListener('click', () => {
+  if (tbWorker) tbWorker.postMessage({ cmd: 'pause' });
+  tbStatus('пауза (всё решённое сохранено)');
+});
+$('#tb-export')?.addEventListener('click', () => {
+  if (!tbMain.size) { showToast('База пока пуста', 'error'); return; }
+  downloadText('checkers-tb.json', JSON.stringify({ app: 'ru-checkers-tb', entries: [...tbMain] }), 'application/json');
+  showToast('База выгружена в файл');
+});
+$('#tb-import')?.addEventListener('change', async (e) => {
+  const f = e.target.files?.[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    const arr = Array.isArray(data.entries) ? data.entries : [];
+    for (const [k, v] of arr) tbMain.set(k, v);
+    await idbBulkPut('tb', arr.map(([key, v]) => ({ key, v })));
+    ensureTB()?.postMessage({ cmd: 'load', entries: [...tbMain] });
+    aiSendTB();
+    tbStatus(`импортировано · ${tbMain.size.toLocaleString()} позиций`);
+  } catch (err) { showToast('Файл базы не читается: ' + err.message, 'error'); }
+  e.target.value = '';
+});
+// когда анализ-воркер создан — передаём ему базу
+document.addEventListener('ai-ready', aiSendTB);
+
+/* ── обучение весов оценки (библиотека + самоигра) ── */
+let trainWorker = null, curWeights = loadPrefs().aiWeights || null;
+const trainStatus = (t) => { const el = $('#train-status'); if (el) el.textContent = t; };
+function applyWeights(w) { curWeights = w; savePrefs({ aiWeights: w }); if (aiWorker) aiWorker.postMessage({ cmd: 'weights', weights: w }); }
+function ensureTrain() {
+  if (trainWorker) return trainWorker;
+  try {
+    trainWorker = new Worker('js/train-worker.js', { type: 'module' });
+    trainWorker.onmessage = (e) => {
+      const d = e.data || {};
+      if (d.ready) { console.info('[train] worker ready'); trainStatus('воркер готов'); return; }
+      if (d.progress != null) trainStatus(`${d.phase}… ${Math.round(d.progress * 100)}%`);
+      if (d.error) { console.warn('[train]', d.error); showToast('Ошибка обучения: ' + d.error, 'error'); }
+      if (d.weights) applyWeights(d.weights);
+      if (d.done) { trainStatus(`готово · обновлено ходов: ${d.ups ?? 0}`); showToast('Веса оценки обучены'); }
+    };
+    trainWorker.onerror = (e) => { console.warn('[train] worker error:', e); showToast('Воркер обучения не запустился: ' + (e.message || 'ошибка'), 'error'); };
+  } catch (e) { console.warn('[train] init:', e); trainWorker = null; }
+  return trainWorker;
+}
+$('#train-run')?.addEventListener('click', () => {
+  const g = sampleGames(300);
+  if (!g.length) { showToast('Библиотека пуста', 'error'); return; }
+  const w = ensureTrain(); if (!w) return;
+  trainStatus('старт…');
+  w.postMessage({ cmd: 'learn', games: g, weights: curWeights, eta: 0.02 });
+});
+$('#train-self')?.addEventListener('click', () => {
+  const w = ensureTrain(); if (!w) return;
+  trainStatus('самоигра… 0%');
+  w.postMessage({ cmd: 'self', n: 6, weights: curWeights, eta: 0.01 });
+});
+$('#train-pause')?.addEventListener('click', () => { trainWorker?.postMessage({ cmd: 'pause' }); trainStatus('пауза'); });
+$('#train-reset')?.addEventListener('click', () => { applyWeights(null); trainStatus('веса: стандартные'); });
+$('#train-export')?.addEventListener('click', () => { downloadText('checkers-weights.json', JSON.stringify({ app: 'ru-checkers-weights', weights: curWeights }), 'application/json'); showToast('Веса выгружены в файл'); });
+$('#train-import')?.addEventListener('change', async (e) => {
+  const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+  try { applyWeights(JSON.parse(await f.text()).weights || null); showToast('Веса загружены'); }
+  catch { showToast('Файл весов не читается', 'error'); }
+});
+
 /* ── запуск ── */
 (function boot() {
   let prefs = loadPrefs();
   if (prefs.orientFix !== 2) prefs = savePrefs({ flipped: false, orientFix: 3 });
   if (THEME_IDS.includes(prefs.theme)) document.documentElement.dataset.theme = prefs.theme;
   document.documentElement.dataset.board = BOARD_IDS.includes(prefs.board) ? prefs.board : 'classic';
-  if (prefs.flipped) boardUI.setFlipped(true);
+  idbAll('tb').then((recs) => {
+    for (const r of recs || []) tbMain.set(r.key, r.v);
+    if (tbMain.size) {
+      ensureTB()?.postMessage({ cmd: 'load', entries: [...tbMain] });
+      aiSendTB();
+      tbStatus(`загружено · ${tbMain.size.toLocaleString()} позиций`);
+    }
+  }).catch(() => {});
   idbSeedIfEmpty();
   bindThemePickers();
   initSettings();

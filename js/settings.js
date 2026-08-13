@@ -102,7 +102,7 @@ export function initSettings() {
   });
   
 
-  const PREF_DEFAULTS = { compact: true, gdbAutosave: false };
+  const PREF_DEFAULTS = { compact: true, gdbAutosave: false, analysisOn: true, aiArrow: true, aiKnowledge: true };
   modal.querySelectorAll('input[data-pref]').forEach((cb) => cb.addEventListener('change', () => {
     savePrefs({ [cb.dataset.pref]: cb.checked });
     document.dispatchEvent(new CustomEvent('app:settings'));

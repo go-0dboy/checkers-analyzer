@@ -292,3 +292,12 @@ export function getLibraryStats(fen) {
   }
   return [...groups.values()];
 }
+
+export function sampleGames(n){
+  const idx=[...games.keys()], out=[];
+  for (let i=0; i<n && idx.length; i++){
+    const g=games[idx.splice((Math.random()*idx.length)|0,1)[0]];
+    out.push({ moves: g.plies.map(p=>p.m), result: g.result });
+  }
+  return out;
+}
