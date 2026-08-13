@@ -6,8 +6,10 @@
  * удаление дебютов, перечитывание. Экспортированный файл можно положить в
  * data/ и добавить в manifest.json — база станет поставляемой по умолчанию.
  */
-import { nameToIdx } from './engine.js';
 import { idbAll, idbSeedIfEmpty} from './idb.js';
+import { nameToIdx, findMoves, initialState, makeMove, stateToFEN } from './engine.js';
+
+let bookMap = null;
 
 const ADMIN_KEY = 'ru-checkers-analyzer:admin';
 let openings = [];
@@ -28,6 +30,7 @@ export function initOpeningsUI({ history }) {
 async function load() {
   await idbSeedIfEmpty();
   openings = (await idbAll('openings')).map(normalize);
+  bookMap = null;
 }
 function normalize(o) {
   o.lines = (o.lines || []).map((line) => line.map((m) => {
@@ -125,3 +128,22 @@ function showTip(btn, text, key) {
   tip.style.left = left + 'px'; tip.style.top = top + 'px';
 }
 
+/** Книга: FEN(позиция) → ходы, которые дебютные линии играют из неё (учитывает транспозиции). */
+export function getOpeningBook() {
+  if (bookMap) return bookMap;
+  bookMap = new Map();
+  for (const o of openings)
+    for (const line of o.lines) {
+      let state = initialState();
+      for (const mv of line) {
+        const fen = stateToFEN(state);
+        const arr = bookMap.get(fen) || [];
+        if (!arr.some((x) => x.from === mv.from && x.to === mv.to)) arr.push({ from: mv.from, to: mv.to, str: mv.str, name: o.name });
+        bookMap.set(fen, arr);
+        const c = findMoves(state, mv.from, mv.to);
+        if (!c.length) break;
+        state = makeMove(state, c[0]);
+      }
+    }
+  return bookMap;
+}

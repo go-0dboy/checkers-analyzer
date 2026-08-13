@@ -777,3 +777,75 @@ body.compact .col-tab { padding: .3rem .55rem; }
 .movelist .move, .movelist .move-comment { overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
 .move-comment { white-space: pre-wrap; }
 .var-block { min-width: 0; }
+
+/* ── панель анализа ── */
+.analysis-panel { animation-delay: .3s; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.analysis-body { padding: .6rem .9rem .9rem; overflow-y: auto; flex: 1 1 auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.ai-eval { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .4rem; }
+.ai-score { font: 800 1.1rem/1 var(--font-mono); color: var(--accent-2); }
+.ai-who { font-size: .7rem; color: var(--text-faint); }
+/* индикатор качества хода (полоса как на chess.com) */
+.ai-movebar { position: relative; height: 10px; border-radius: 6px; margin: .55rem 0 .3rem;
+  background: linear-gradient(90deg, rgba(226,86,59,.5), rgba(226,86,59,.12) 44%, var(--line-soft) 50%, rgba(142,196,111,.12) 56%, rgba(142,196,111,.5)); }
+.ai-movebar::before { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; transform: translateX(-50%); background: var(--text-faint); border-radius: 1px; opacity: .8; } /* нулевая отметка */
+.ai-movebar-mark { position: absolute; top: 50%; width: 14px; height: 14px; border-radius: 50%; transform: translate(-50%,-50%); border: 2px solid var(--panel); box-shadow: 0 1px 5px rgba(0,0,0,.5); transition: left .25s ease; }
+.ai-movebar.good .ai-movebar-mark { background: var(--good); }
+.ai-movebar.ok .ai-movebar-mark { background: var(--accent-2); }
+.ai-movebar.bad .ai-movebar-mark { background: #e08a3c; }
+.ai-movebar.blunder .ai-movebar-mark { background: var(--danger); }
+.ai-movebar-note { font: 600 .7rem/1.4 var(--font-mono); color: var(--text-faint); }
+.ai-line { display: flex; gap: .4rem; align-items: baseline; font-family: var(--font-mono); font-size: .76rem; padding: .18rem 0; }
+.ai-n { color: var(--text-faint); }
+.ai-ls { color: var(--accent-2); font-weight: 700; }
+.ai-pv { color: var(--text-faint); font-size: .68rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── стрелка «лучший ход» и кликабельные строки анализа ── */
+#board { position: relative; }
+#ai-arrow { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+.ai-line { cursor: pointer; border-radius: 6px; padding: .18rem .3rem; transition: background .12s ease; }
+.ai-line:hover { background: var(--line-soft); }
+.ai-line .ai-pv { pointer-events: none; }
+
+.ai-badge { font-size: .58rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; padding: .1rem .45rem; margin-left: .3rem; vertical-align: middle; }
+.ai-badge.book { color: var(--accent-ink); background: linear-gradient(180deg, var(--accent-2), var(--accent)); }
+.ai-badge.stat { color: var(--text-dim); border: 1px solid var(--line); }
+
+/* ── анализ: компактные двухстрочные строки и бейджи (мобильные переопределения) ── */
+.ai-lines { display: flex; flex-direction: column; gap: .15rem; margin-top: .4rem; }
+.ai-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "n mv ls"
+    "sub sub sub";
+  gap: .12rem .5rem;
+  padding: .32rem .4rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: background .12s ease;
+}
+.ai-line:hover { background: var(--line-soft); }
+.ai-n  { grid-area: n;  color: var(--text-faint); font-size: .72rem; }
+.ai-mv { grid-area: mv; font-weight: 700; font-size: .8rem; }
+.ai-ls { grid-area: ls; color: var(--accent-2); font-weight: 700; font-size: .76rem; }
+.ai-sub { grid-area: sub; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; min-width: 0; }
+.ai-pv { color: var(--text-faint); font-size: .66rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; pointer-events: none; }
+.ai-meta { font-size: .64rem; color: var(--text-faint); margin-left: auto; }
+.ai-badge {
+  font-size: .56rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  border-radius: 999px; padding: .14rem .5rem; max-width: 14ch;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none;
+}
+.ai-badge.book { color: var(--accent-ink); background: linear-gradient(180deg, var(--accent-2), var(--accent)); }
+.ai-badge.stat { color: var(--text-dim); border: 1px solid var(--line); }
+.stat-short { display: none; }
+@media (max-width: 560px) {
+  .ai-badge { font-size: .52rem; padding: .1rem .42rem; max-width: 11ch; }
+  .stat-full { display: none; }
+  .stat-short { display: inline; }
+  .ai-pv { font-size: .6rem; }
+}
+@media (max-width: 400px) {
+  .ai-pv { display: none; }
+}

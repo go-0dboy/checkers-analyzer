@@ -7,21 +7,21 @@
 import { savePrefs, loadPrefs } from './storage.js';
 import { THEME_IDS, BOARD_IDS, updateThemeMenu, updateBoardMenu } from './themes.js';
 
-const DEFAULT_PANELS = { players: false, notation: true, library: true, openings: true, gamesdb: true, setupTags: true, setupFen: true };
+const DEFAULT_PANELS = { players: false, notation: true, library: true, openings: true, gamesdb: true, setupTags: true, setupFen: true, analysis: true };
 export function getPanelPrefs() { const p = loadPrefs(); return Object.assign({}, DEFAULT_PANELS, p.panels || {}); }
 
-const DEFAULT_SIDES = {notation: 'right', library: 'left', openings: 'left', gamesdb: 'right', setupTags: 'right' };
+const DEFAULT_SIDES = {notation: 'right', library: 'left', openings: 'left', gamesdb: 'right', setupTags: 'right', analysis: 'right' };
 export function getSidePrefs() { const p = loadPrefs(); return Object.assign({}, DEFAULT_SIDES, p.sides || {}); }
 
 const DEFAULT_ORDER = {
-  analyze: {library: 1, openings: 2, gamesdb: 3, notation: 0 },
-  setup:   { setupTags: 0 },
+  analyze: {library: 1, openings: 2, gamesdb: 3, notation: 0, analysis: 4 },
+  setup:   { setupTags: 0 }, 
 };
 export function getOrderPrefs() {
   const p = loadPrefs(); const o = p.order || {};
   return { analyze: Object.assign({}, DEFAULT_ORDER.analyze, o.analyze || {}), setup: Object.assign({}, DEFAULT_ORDER.setup, o.setup || {}) };
 }
-const MODE_OF = {notation: 'analyze', openings: 'analyze', library: 'analyze', gamesdb: 'analyze', setupTags: 'setup' };
+const MODE_OF = {notation: 'analyze', openings: 'analyze', library: 'analyze', gamesdb: 'analyze', setupTags: 'setup', analysis: 'analyze' };
 
 const DELAY_MIN = 100, DELAY_MAX = 1500, DELAY_STEP = 100, DELAY_DEF = 400;
 const clampDelay = (v) => { const n = Number(v); if (!Number.isFinite(n)) return DELAY_DEF; return Math.min(DELAY_MAX, Math.max(DELAY_MIN, Math.round(n / DELAY_STEP) * DELAY_STEP)); };
@@ -33,6 +33,7 @@ const PANEL_LABELS = {
   players: 'Панель игроков', notation: 'Панель нотации',
   openings: 'Панель дебютов', library: 'Панель библиотеки', gamesdb: 'База партий',
   setupTags: 'Панель тегов', setupFen: 'Панель FEN',
+  analysis: 'Панель анализа',
 };
 
 function applyTheme(id) { if (!THEME_IDS.includes(id)) return; document.documentElement.dataset.theme = id; savePrefs({ theme: id }); updateThemeMenu(); }
@@ -141,7 +142,7 @@ export function initSettings() {
     const sides = getSidePrefs(); const order = getOrderPrefs();
     const sortG = (keys, mode) => keys.slice().sort((a, b) => (order[mode][a] ?? 0) - (order[mode][b] ?? 0));
 
-    const aSide = ['notation', 'openings', 'library', 'gamesdb'];
+    const aSide = ['notation', 'openings', 'library', 'gamesdb', 'analysis'];
     const aRight = sortG(aSide.filter((k) => (sides[k] || 'right') === 'right'), 'analyze');
     const aLeft = sortG(aSide.filter((k) => (sides[k] || 'right') === 'left'), 'analyze');
     let aHtml = buildRow('players', false, false);

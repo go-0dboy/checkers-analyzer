@@ -11,7 +11,7 @@ import {
   getLegalMoves, getMovesForPiece, getJumpSteps,
   getGameStatus, hasMandatoryCapture,
   colorOf, isKingPiece, pieceChar, moveToString, isDarkSquare,
-  sepForGameType, setCaptureSep, stateToFEN, SIZE, rankOf, fenToState,
+  sepForGameType, setCaptureSep, stateToFEN, SIZE, rankOf, fenToState
 } from './engine.js';
 import { BoardUI } from './board.js';
 import { GameHistory } from './history.js';
@@ -23,10 +23,10 @@ import {
 import { THEME_IDS, BOARD_IDS, bindThemePickers, updateThemeMenu, updateBoardMenu, closeThemeMenu, closeBoardMenu } from './themes.js';
 import { showToast } from './toast.js';
 import { saveSetupSVG } from './export.js';
-import { initLibraryUI } from './library.js';
+import { initLibraryUI, getLibraryStats } from './library.js';
 import { initSettings, getPanelPrefs, getSidePrefs, getOrderPrefs, getAutoPrefs } from './settings.js';
-import { initOpeningsUI } from './openings.js';
-import { initGamesDBUI, addCurrentToDb } from './gamesdb.js';
+import { initOpeningsUI, getOpeningBook } from './openings.js';
+import { initGamesDBUI, addCurrentToDb, getGamesDbStats } from './gamesdb.js';
 import { idbSeedIfEmpty } from './idb.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -79,17 +79,20 @@ function lostPieces(rootState, state, color) {
 
 /* ── центральный цикл синхронизации ── */
 history.onChange = () => { selected = null; activeHints = null; pending = null; sync(); };
+
 function sync() {
   stopAutoCapture(); stopAutoStart();
   applyModeVisibility();
-  if (mode === 'setup') { syncSetup(); return; }
+  if (mode === 'setup') { syncSetup(); drawAiArrow(); return; }
   const state = history.currentState;
   const status = getGameStatus(state);
   selected = null; activeHints = null; pending = null;
   renderAnalyze(history.lastMove);
+  drawAiArrow();
   syncNav(); syncPlayerBars(); updateAnnButtons();
   document.dispatchEvent(new CustomEvent('app:sync'));
   $('#board').classList.toggle('game-over', status.over);
+  scheduleAnalysis();
 }
 function renderAnalyze(lastMove = history.lastMove) {
   const state = history.currentState;
@@ -116,9 +119,12 @@ const SIDE_FOR = {
   'openings-panel': 'openings',
   'library-panel': 'library',
   'gamesdb-panel': 'gamesdb',
+  'analysis-panel': 'analysis',
 };
-const TAB_LABELS = { meta: 'Партия', notation: 'Нотация', library: 'Библиотека', openings: 'Дебюты', gamesdb: 'База', setupTags: 'Теги' };
-const TAB_ICON = { meta: 'П', notation: 'Н', library: 'Б', openings: 'Д', gamesdb: 'БЗ', setupTags: 'Т' };
+
+const TAB_LABELS = { meta: 'Партия', notation: 'Нотация', library: 'Библиотека', openings: 'Дебюты', gamesdb: 'База', analysis: 'Анализ', setupTags: 'Теги' };
+
+const TAB_ICON = { meta: 'П', notation: 'Н', library: 'Б', openings: 'Д', gamesdb: 'БЗ', analysis: 'А', setupTags: 'Т' };
 
 function applyModeVisibility() {
   const setup = mode === 'setup';
@@ -144,6 +150,7 @@ function applyModeVisibility() {
   $('#player-bottom').hidden = setup || !show.players;
   $('#controls').hidden = setup;
   document.body.classList.toggle('compact', loadPrefs().compact !== false);
+  $('#analysis-panel').hidden   = setup || !show.analysis;
   applyLayout();
 }
 
@@ -379,11 +386,17 @@ function enterSetup() {
   mode = 'setup';
   setupBoard = history.currentState.board.slice();
   setupTurn = history.currentState.turn;
+  // ВАЖНО: переключатель «Ход» должен отражать реальную очередь хода,
+  // иначе видимое состояние кнопок расходится с setupTurn и «Применить»
+  // ставит не тот цвет.
+  document.querySelectorAll('[data-turn-choice]').forEach((b) =>
+    b.classList.toggle('active', b.dataset.turnChoice === setupTurn));
   boardUI.setSetupMode(true);
   headersSnapshot = { ...gameHeaders };
   fillSetupMetaFields();
   sync();
 }
+
 function exitSetup() { mode = 'analyze'; boardUI.setSetupMode(false); sync(); syncMetaPanel(); }
 function syncSetup() { renderSetupBoard(); renderSetupMetaPreview(); $('#board').classList.remove('game-over'); }
 function renderSetupBoard() { boardUI.render({ board: setupBoard, turn: setupTurn, plies: 0 }, {}); updateSetupFen(); }
@@ -757,7 +770,14 @@ $('#btn-start').addEventListener('click', () => history.toStart());
 $('#btn-prev').addEventListener('click', () => history.back());
 $('#btn-next').addEventListener('click', () => history.forward());
 $('#btn-end').addEventListener('click', () => history.toEnd());
-function flipBoard() { boardUI.toggleFlip(); savePrefs({ flipped: boardUI.flipped }); syncPlayerBars(); }
+
+function flipBoard() {
+  boardUI.toggleFlip(); // синхронно перерисовывает клетки и data-sq
+  savePrefs({ flipped: boardUI.flipped });
+  syncPlayerBars();
+  drawAiArrow(); // стрелка перерисовывается под новую ориентацию
+}
+
 $('#btn-flip').addEventListener('click', flipBoard);
 $('#btn-new').addEventListener('click', () => { if (!history.isEmpty && !confirm('Начать новую партию? Текущие ходы будут сброшены.')) return; runAction('new-game'); });
 window.addEventListener('keydown', (e) => {
@@ -772,6 +792,166 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+/* ── ИИ-анализ (локальный движок в воркере, устойчивый к ошибкам) ── */
+let aiWorker = null, aiSeq = 0, aiTimer = null, aiWatchdog = null, pendingFen = null;
+const lastAi = { result: null, grade: null, book: [], stats: [] };
+function ensureAi() {
+  if (aiWorker !== null) return aiWorker;
+  try {
+    aiWorker = new Worker('js/ai-worker.js', { type: 'module' });
+    aiWorker.onmessage = onAi;
+    aiWorker.onerror = (e) => { console.warn('ai worker error:', e); aiWorker = false; };
+  } catch { aiWorker = false; }
+  return aiWorker;
+}
+function onAi(e) {
+  const { id, result, grade, error } = e.data || {};
+  if (id !== aiSeq) return;
+  clearTimeout(aiWatchdog);
+  if (error) { console.warn('ai:', error); lastAi.result = null; renderAnalysis(); return; }
+  if (result) { lastAi.result = result; lastAi.fen = pendingFen; }
+  if (grade !== undefined) lastAi.grade = grade;
+  renderAnalysis();
+}
+function scheduleAnalysis() { clearTimeout(aiTimer); aiTimer = setTimeout(doAnalysis, 250); }
+
+function collectKnowledge(fen) {
+  try {
+    const book = (typeof getOpeningBook === 'function') ? (getOpeningBook().get(fen) || []) : [];
+    const lib  = (typeof getLibraryStats === 'function') ? (getLibraryStats(fen) || []) : [];
+    const gdb  = (typeof getGamesDbStats === 'function') ? (getGamesDbStats(fen) || []) : [];
+    return { book, stats: [...lib, ...gdb] };
+  } catch (e) {
+    console.warn('knowledge:', e);
+    return { book: [], stats: [] };
+  }
+}
+
+function doAnalysis() {
+  const body = $('#analysis-body');
+  if (!body || mode === 'setup' || $('#analysis-panel')?.hidden || loadPrefs().analysisOn === false) return;
+  aiSeq++;
+  const id = aiSeq, depth = Number(loadPrefs().analysisDepth) || 6;
+  const timeMs = depth <= 4 ? 400 : depth <= 6 ? 900 : 1600;
+  const state = history.currentState, parent = history.current.parent;
+  body.innerHTML = '<div class="lib-empty">Считаем…</div>';
+
+  // знания: дебютная книга + статистика баз (если настройка включена)
+  let extra = null;
+  if (loadPrefs().aiKnowledge !== false) {
+    try {
+      const fen = stateToFEN(state);
+      extra = {
+        book: (typeof getOpeningBook === 'function') ? (getOpeningBook().get(fen) || []) : [],
+        stats: [
+          ...((typeof getLibraryStats === 'function') ? (getLibraryStats(fen) || []) : []),
+          ...((typeof getGamesDbStats === 'function') ? (getGamesDbStats(fen) || []) : []),
+        ],
+      };
+      lastAi.book = extra.book; lastAi.stats = extra.stats;
+    } catch (e) { console.warn('knowledge:', e); extra = null; lastAi.book = []; lastAi.stats = []; }
+  } else { lastAi.book = []; lastAi.stats = []; }
+
+  pendingFen = stateToFEN(state);
+  if (ensureAi()) {
+    aiWorker.postMessage({ id, type: 'analyze', state, opts: { maxDepth: depth + 2, timeMs }, extra });
+    aiWorker.postMessage({ id, type: 'grade', before: parent?.state ?? state, after: state, opts: { depth: 6, timeMs: 700 } });
+    if (!parent) lastAi.grade = null;
+  } else {
+    import('./ai.js').then((ai) => {
+      lastAi.result = ai.analyze(state, { maxDepth: Math.min(depth + 2, 8), timeMs: Math.min(timeMs, 600) }, extra);
+      lastAi.grade = parent ? ai.gradeMove(parent.state, state, { depth: 6, timeMs: 400 }) : null;
+      renderAnalysis();
+    }).catch((e) => { console.warn('ai fallback:', e); lastAi.result = null; renderAnalysis(); });
+  }
+}
+
+const fmtScore = (sw) => ((sw > 0 ? '+' : '') + (sw / 100).toFixed(2));
+function renderAnalysis() {
+  const body = $('#analysis-body'); if (!body) return;
+  const r = lastAi.result, g = lastAi.grade;
+  if (!r) { drawAiArrow(); return; }
+  if (r.over) { body.innerHTML = `<div class="lib-empty">Партия окончена${r.winner ? ' · победа ' + (r.winner === 'w' ? 'белых' : 'чёрных') : ' · ничья'}</div>`; drawAiArrow(); return; }
+  const p = r.scoreWhite / 100;
+  const who = p > 0.35 ? 'лучше у белых' : p < -0.35 ? 'лучше у чёрных' : 'равная борьба';
+  let html = `<div class="ai-eval"><span class="ai-score">${(p > 0 ? '+' : '') + p.toFixed(2)}</span><span class="ai-who">${who}</span><span class="ai-meta">глубина ${r.depth} · ${r.nodes.toLocaleString()} поз.</span></div>`;
+  if (g) {
+    const delta = -g.loss;
+    const pos = 50 + Math.max(-1, Math.min(1, delta / 200)) * 50;
+    const cls = g.loss <= 15 ? 'good' : g.loss <= 40 ? 'ok' : g.loss <= 90 ? 'bad' : 'blunder';
+    const val = (delta > 0 ? '+' : '') + (delta / 100).toFixed(2);
+    html += `<div class="ai-movebar ${cls}" title="Изменение оценки последним ходом"><span class="ai-movebar-mark" style="left:${pos.toFixed(1)}%"></span></div><div class="ai-movebar-note">${val}${g.loss > 40 && g.bestSan ? ` · сильнее ${g.bestSan}` : ''}</div>`;
+  }
+  
+  html += `<div class="ai-lines">` + r.lines.map((l, i) => {
+  const mb = (lastAi.book || []).find((b) => b.from === l.move.from && b.to === l.move.to);
+  const ms = (lastAi.stats || []).find((s) => s.from === l.move.from && s.to === l.move.to);
+  const badges = (mb ? `<span class="ai-badge book" title="Дебют: ${esc(mb.name)}">${esc(mb.name)}</span>` : '') +
+    (ms ? `<span class="ai-badge stat" title="В базах партий: ${ms.total} (${ms.w}–${ms.d}–${ms.l})">` +
+      `<span class="stat-full">${ms.total}·${ms.w}–${ms.d}–${ms.l}</span>` +
+      `<span class="stat-short">${ms.total}·${Math.round((ms.w / ms.total) * 100)}%</span></span>` : '');
+  return `<div class="ai-line" data-ai="${i}" title="Сыграть ход ${l.san}">` +
+    `<span class="ai-n">${i + 1}.</span><b class="ai-mv">${l.san}</b><span class="ai-ls">${fmtScore(l.scoreWhite)}</span>` +
+    `<span class="ai-sub">${badges}<span class="ai-pv">${l.pv}</span></span></div>`;
+}).join('') + `</div>`;
+
+  body.innerHTML = html;
+  drawAiArrow();
+}
+
+$('#ai-toggle')?.addEventListener('click', () => {
+  const on = loadPrefs().analysisOn !== false;
+  savePrefs({ analysisOn: !on });
+  $('#ai-toggle').classList.toggle('active', !on);
+  if (!on) { lastAi.result = null; lastAi.grade = null; }
+  doAnalysis();
+});
+$('#ai-depth')?.addEventListener('change', (e) => { savePrefs({ analysisDepth: e.target.value }); doAnalysis(); });
+$('#analysis-body')?.addEventListener('click', (e) => {
+  const line = e.target.closest('.ai-line[data-ai]'); if (!line) return;
+  const l = lastAi.result?.lines?.[Number(line.dataset.ai)];
+  if (l?.move) playAiMove(l.move);
+});
+function playAiMove(mv) {
+  const state = history.currentState;
+  if (getGameStatus(state).over) return;
+  const candidates = getLegalMoves(state).filter((m) => m.from === mv.from && m.to === mv.to);
+  if (!candidates.length) { showToast('Этот ход недоступен в текущей позиции', 'error'); return; }
+  const move = candidates.find((m) => m.path.length === (mv.path?.length || 0) && m.path.every((s, i) => s === mv.path[i])) || candidates[0];
+  commitMove(move);
+}
+(function ensureArrow() {
+  if (!document.getElementById('ai-arrow')) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = 'ai-arrow';
+    $('#board').appendChild(svg);
+  }
+})();
+function drawAiArrow() {
+  const svg = document.getElementById('ai-arrow'); if (!svg) return;
+  const boardEl = $('#board');
+  const mv = lastAi.result?.lines?.[0]?.move;
+  
+  const show = mv && mode !== 'setup' && !$('#analysis-panel')?.hidden &&
+  loadPrefs().analysisOn !== false && loadPrefs().aiArrow !== false &&
+  !lastAi.result?.over && lastAi.fen === stateToFEN(history.currentState);
+  
+  if (!show) { svg.innerHTML = ''; svg.style.display = 'none'; return; }
+  const squares = [...boardEl.children].filter((el) => el.classList.contains('square'));
+  const dFrom = squares.findIndex((el) => Number(el.dataset.sq) === mv.from);
+  const dTo = squares.findIndex((el) => Number(el.dataset.sq) === mv.to);
+  if (dFrom < 0 || dTo < 0) { svg.style.display = 'none'; return; }
+  const W = boardEl.clientWidth || 600, H = boardEl.clientHeight || 600;
+  const x1 = ((dFrom & 7) + .5) / 8 * W, y1 = ((dFrom >> 3) + .5) / 8 * H;
+  const x2 = ((dTo & 7) + .5) / 8 * W, y2 = ((dTo >> 3) + .5) / 8 * H;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.style.display = 'block';
+  const sw = Math.max(4, W * 0.018);
+  svg.innerHTML = `<defs><marker id="ai-arrow-head" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.2" markerHeight="4.2" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(142,196,111,.85)"></path></marker></defs><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(142,196,111,.8)" stroke-width="${sw}" stroke-linecap="round" marker-end="url(#ai-arrow-head)"></line>`;
+}
+
+window.addEventListener('resize', () => drawAiArrow());
+
 /* ── запуск ── */
 (function boot() {
   let prefs = loadPrefs();
@@ -782,6 +962,8 @@ window.addEventListener('keydown', (e) => {
   idbSeedIfEmpty();
   bindThemePickers();
   initSettings();
+  $('#ai-toggle')?.classList.toggle('active', loadPrefs().analysisOn !== false);
+  $('#ai-depth') && ($('#ai-depth').value = String(loadPrefs().analysisDepth || 6));
   wireColumnTabs();
   applyLayout();
   initOpeningsUI({ history });

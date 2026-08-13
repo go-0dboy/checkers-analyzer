@@ -276,3 +276,19 @@ function wireAdmin() {
     buildIndex(); renderAdmin(); renderLibrary();
   });
 }
+
+export function getLibraryStats(fen) {
+  const side = fen[0].toLowerCase() === 'b' ? 'b' : 'w';
+  const rows = (index.get(fen) || []).map((e) => ({ g: games[e.g], p: e.p }));
+  const groups = new Map();
+  for (const r of rows) {
+    const mv = r.g.plies[r.p].m;
+    const sq = mv.toLowerCase().split(/[x:×-]/);
+    const from = nameToIdx(sq[0]), to = nameToIdx(sq[sq.length - 1]);
+    const g = groups.get(from + '-' + to) || { from, to, mv, w: 0, d: 0, l: 0, total: 0 };
+    const c = classify(side, r.g.result);
+    if (c === 'w') g.w++; else if (c === 'd') g.d++; else g.l++;
+    g.total++; groups.set(from + '-' + to, g);
+  }
+  return [...groups.values()];
+}

@@ -327,6 +327,18 @@
         <div class="gdb-list" id="gdb-list"></div>
         <input type="file" id="gdb-db-file" accept=".json" hidden>
       </section>
+      
+      <section class="panel analysis-panel" id="analysis-panel">
+        <header class="panel-head"><h2>Анализ</h2><span class="panel-hint">локальный движок</span></header>
+        <div class="notation-toolbar">
+          <select id="ai-depth" class="gdb-base-select" title="Глубина расчёта">
+            <option value="4">быстро</option><option value="6" selected>средне</option><option value="8">глубоко</option>
+          </select>
+          <button class="nt-btn active" id="ai-toggle" title="Включить/выключить анализ">⏻</button>
+        </div>
+        <div class="analysis-body" id="analysis-body"></div>
+      </section>
+      
     </aside>
   </main>
 
@@ -443,7 +455,15 @@
                    min="100" max="1500" step="100" value="400"
                    title="Задержка между авто-шагами взятия: влево — быстрее, вправо — медленнее">
           </div>
-        </section>        
+        </section>
+        
+        <section class="set-section">
+  <h4>Анализ</h4>
+  <label class="set-check"><input type="checkbox" data-pref="analysisOn"> Включить анализ</label>
+  <label class="set-check"><input type="checkbox" data-pref="aiArrow"> Стрелка лучшего хода на доске</label>
+  <label class="set-check"><input type="checkbox" data-pref="aiKnowledge"> Учитывать дебютную книгу и статистику</label>
+</section>
+
         <section class="set-section">
           <h4>Панели · анализ партии</h4>
           <div id="set-analyze-rows"></div>

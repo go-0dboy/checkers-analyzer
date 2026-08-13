@@ -11,7 +11,10 @@
 import { idbGet, idbPut } from './idb.js';
 import { downloadText, pickAndReadFile, loadPrefs } from './storage.js';
 import { showToast } from './toast.js';
+import { stateToFEN } from './engine.js';
+import { parsePDN } from './pdn.js';
 
+let gdIndex = null;
 let historyRef = null, loadPdnRef = null;
 let db = null, fileHandle = null;
 let currentBaseId = null, selectedId = null;
@@ -68,6 +71,7 @@ function scheduleAutosave() {
 
 /* ── состояние ── */
 async function loadWorking() {
+  gdIndex = null;
   const rec = await idbGet('kv', 'gamesdb').catch(() => null);
   db = normalizeDb(rec?.value);
   if (!rec) await idbPut('kv', { key: 'gamesdb', value: db });
@@ -83,7 +87,10 @@ function normalizeDb(raw) {
   if (raw && Array.isArray(raw.games)) return { name: raw.name || 'База данных', bases: [{ id: 1, name: 'Импортированные партии', games: raw.games }] };
   return { name: 'Моя база данных', bases: [{ id: 1, name: 'Мои партии', games: [] }] };
 }
-async function persist() { await idbPut('kv', { key: 'gamesdb', value: db }); scheduleAutosave(); }
+async function persist() { 
+  gdIndex = null;
+  await idbPut('kv', { key: 'gamesdb', value: db }); scheduleAutosave();
+}
 const curBase = () => db?.bases.find((b) => b.id === currentBaseId) || null;
 
 function refreshUI() {
@@ -230,9 +237,40 @@ function wire() {
 
 function applyDbText(text) {
   try {
+    gdIndex = null;
     db = normalizeDb(JSON.parse(text));
     currentBaseId = db.bases[0]?.id ?? null; selectedId = null;
     persist(); refreshUI();
     showToast(`Открыта база данных «${db.name}»`);
   } catch (e) { showToast('Файл не является базой данных: ' + e.message, 'error'); }
+}
+
+function buildGdIndex() {
+  gdIndex = new Map(); if (!db) return;
+  for (const b of db.bases) for (const g of b.games) {
+    try {
+      const parsed = parsePDN(g.pdn);
+      let node = parsed.tree[0];
+      while (node) {
+        const arr = gdIndex.get(stateToFEN(node.before)) || [];
+        arr.push({ from: node.move.from, to: node.move.to, result: parsed.result || g.result });
+        gdIndex.set(stateToFEN(node.before), arr);
+        node = node.children[0];
+      }
+    } catch { }
+  }
+}
+export function getGamesDbStats(fen) {
+  if (!gdIndex) buildGdIndex();
+  const side = fen[0].toLowerCase() === 'b' ? 'b' : 'w';
+  const groups = new Map();
+  for (const r of (gdIndex.get(fen) || [])) {
+    const g = groups.get(r.from + '-' + r.to) || { from: r.from, to: r.to, w: 0, d: 0, l: 0, total: 0 };
+    const w = r.result === '1-0' || r.result === '2-0', l = r.result === '0-1' || r.result === '0-2';
+    const win = (side === 'w' && w) || (side === 'b' && l);
+    const draw = r.result === '1/2-1/2' || r.result === '1-1';
+    if (win) g.w++; else if (draw) g.d++; else g.l++;
+    g.total++; groups.set(r.from + '-' + r.to, g);
+  }
+  return [...groups.values()];
 }

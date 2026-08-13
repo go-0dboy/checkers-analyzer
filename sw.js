@@ -10,7 +10,7 @@
  * Список ASSETS пре-кэшируется при установке, чтобы критичные файлы были
  * доступны сразу, даже если сеть появится позже.
  */
-const CACHE = 'checkers-v6';
+const CACHE = 'checkers-v7';
 
 const ASSETS = [
   './',
@@ -33,6 +33,8 @@ const ASSETS = [
   './js/openings.js',
   './data/games.json',
   './data/openings.json',
+  './js/ai.js', 
+  './js/ai-worker.js',
 ];
 
 self.addEventListener('install', (event) => {
