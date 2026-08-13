@@ -221,13 +221,25 @@ function pvLine(state, first, depth) {
   return pv.join(' ');
 }
 
-/** Итеративное углубление + aspiration; эндшпиль-оракул при малом числе фигур. */
+/** Практическая надбавка: книжный ход и исторически успешные ходы. */
+function knowledgeBonus(m, extra) {
+  if (!extra) return 0;
+  let b = 0;
+  if ((extra.book || []).some((x) => x.from === m.from && x.to === m.to)) b += 30; // ход из дебютной книги
+  const s = (extra.stats || []).find((x) => x.from === m.from && x.to === m.to);
+  if (s && s.total >= 3) {
+    const conf = Math.min(1, s.total / 12);                 // доверие по объёму выборки
+    b += Math.round(20 * conf * ((s.w / s.total) - 0.5) * 2); // −20..+20 по проценту побед
+  }
+  return b;
+}
+
 export function analyze(state, { maxDepth = 10, timeMs = 1200 } = {}, extra = null) {
   const st = getGameStatus(state);
   if (st.over) return { over: true, winner: st.winner, scoreWhite: st.winner === null ? 0 : (st.winner === WHITE ? 999 : -999), lines: [], depth: 0, nodes: 0 };
   tt.clear(); hist.clear(); killers = []; pathMap.clear();
   const total = pieceCount(state);
-  const top = Math.min((maxDepth || 10) + (total <= 6 ? 6 : 0) + (total <= 4 ? 6 : 0), 30);
+  const top = Math.min((maxDepth || 10) + (total <= 6 ? 4 : 0) + (total <= 4 ? 6 : 0), 30);
   const budget = timeMs + (total <= 6 ? 500 : 0) + (total <= 4 ? 700 : 0);
   let prev = 0, res = null, finalDepth = 0, prior = null;
   for (let d = 2; d <= top; d += 2) {
@@ -246,6 +258,11 @@ export function analyze(state, { maxDepth = 10, timeMs = 1200 } = {}, extra = nu
     if (Date.now() > deadline || (out && out.aborted)) break;
   }
   if (!res) res = searchRoot(state, 2, extra, null).res;
+  // знания влияют на РЕКОМЕНДАЦИИ: надбавка к счёту и пересортировка
+  if (extra) {
+    for (const r of res) r.score += knowledgeBonus(r.move, extra);
+    res.sort((a, b) => b.score - a.score);
+  }
   const toWhite = state.turn === WHITE ? (x) => x : (x) => -x;
   return {
     over: false,

@@ -832,7 +832,6 @@ function doAnalysis() {
   if (!body || mode === 'setup' || $('#analysis-panel')?.hidden || loadPrefs().analysisOn === false) return;
   aiSeq++;
   const id = aiSeq, depth = Number(loadPrefs().analysisDepth) || 6;
-  const timeMs = depth <= 4 ? 400 : depth <= 6 ? 900 : 1600;
   const state = history.currentState, parent = history.current.parent;
   body.innerHTML = '<div class="lib-empty">Считаем…</div>';
 
@@ -848,21 +847,22 @@ function doAnalysis() {
           ...((typeof getGamesDbStats === 'function') ? (getGamesDbStats(fen) || []) : []),
         ],
       };
-      lastAi.book = extra.book; lastAi.stats = extra.stats;
-    } catch (e) { console.warn('knowledge:', e); extra = null; lastAi.book = []; lastAi.stats = []; }
-  } else { lastAi.book = []; lastAi.stats = []; }
+    } catch (e) { console.warn('knowledge:', e); extra = null; }
+  }
+  lastAi.book = extra?.book || [];
+  lastAi.stats = extra?.stats || [];
 
-  pendingFen = stateToFEN(state);
   if (ensureAi()) {
-    aiWorker.postMessage({ id, type: 'analyze', state, opts: { maxDepth: depth + 2, timeMs }, extra });
-    aiWorker.postMessage({ id, type: 'grade', before: parent?.state ?? state, after: state, opts: { depth: 6, timeMs: 700 } });
+    pendingFen = stateToFEN(state);
+    aiWorker.postMessage({ id, type: 'analyze', state, opts: { depth, timeMs: 900 }, extra });
+    aiWorker.postMessage({ id, type: 'grade', before: parent?.state ?? state, after: state, opts: { depth, timeMs: 700 } });
     if (!parent) lastAi.grade = null;
   } else {
     import('./ai.js').then((ai) => {
-      lastAi.result = ai.analyze(state, { maxDepth: Math.min(depth + 2, 8), timeMs: Math.min(timeMs, 600) }, extra);
-      lastAi.grade = parent ? ai.gradeMove(parent.state, state, { depth: 6, timeMs: 400 }) : null;
+      lastAi.result = ai.analyze(state, { depth: 4, timeMs: 400 }, extra);
+      lastAi.grade = parent ? ai.gradeMove(parent.state, state, { depth: 4, timeMs: 300 }) : null;
       renderAnalysis();
-    }).catch((e) => { console.warn('ai fallback:', e); lastAi.result = null; renderAnalysis(); });
+    });
   }
 }
 
