@@ -29,10 +29,11 @@ function trainFromLines(state, lines, eta) {
   const sign = state.turn === 'w' ? 1 : -1;
   let ups = 0;
   const best = lines[0];
+  // Порог снижен с 40 до 12 с.п. — учится даже на небольших различиях
   for (let k = 1; k < lines.length; k++) {
     const worse = lines[k];
-    const gap = sign * (best.scoreWhite - worse.scoreWhite); // разрыв в перспективе ходящего
-    if (gap > 40) ups += update(state, best.move, worse.move, eta);
+    const gap = sign * (best.scoreWhite - worse.scoreWhite);
+    if (gap > 12) ups += update(state, best.move, worse.move, eta);
   }
   return ups;
 }
@@ -45,10 +46,10 @@ async function trainOnGame(g, eta) {
     const moves = getLegalMoves(state);
     const good = moves.find((m) => m.from === from && m.to === to);
     if (!good) break;
-    // тихие позиции из живой партии, каждые 2 полухода — тюнинг по ранжиру движка
-    if (moves.length > 1 && i >= 2 && i % 2 === 0 && !good.isCapture) {
+    // Учимся на КАЖДОМ тихом ходе (было через 2) и берём топ-6 вместо топ-4
+    if (moves.length > 1 && i >= 2 && !good.isCapture) {
       try {
-        const r = analyze(state, { depth: 5, timeMs: 120, lines: 4 });
+        const r = analyze(state, { depth: 10, timeMs: 300, lines: 10});
         ups += trainFromLines(state, r.lines, eta);
       } catch (err) { console.warn('[train] analyze error in learn:', err); }
     }

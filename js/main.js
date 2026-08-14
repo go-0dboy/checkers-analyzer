@@ -1049,7 +1049,7 @@ function ensureTrain() {
   return trainWorker;
 }
 $('#train-run')?.addEventListener('click', () => {
-  const g = sampleGames(300);
+  const g = sampleGames(5000);
   if (!g.length) { showToast('Библиотека пуста', 'error'); return; }
   const w = ensureTrain(); if (!w) return;
   trainStatus('старт…');
@@ -1058,7 +1058,7 @@ $('#train-run')?.addEventListener('click', () => {
 $('#train-self')?.addEventListener('click', () => {
   const w = ensureTrain(); if (!w) return;
   trainStatus('самоигра… 0%');
-  w.postMessage({ cmd: 'self', n: 6, weights: curWeights, eta: 0.01 });
+  w.postMessage({ cmd: 'self', n: 50, weights: curWeights, eta: 0.01 });
 });
 $('#train-pause')?.addEventListener('click', () => { trainWorker?.postMessage({ cmd: 'pause' }); trainStatus('пауза'); });
 $('#train-reset')?.addEventListener('click', () => { applyWeights(null); trainStatus('веса: стандартные'); });
