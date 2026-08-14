@@ -1,55 +1,52 @@
 /**
  * @module ai
- * Локальный движок русских шашек — версия с обучаемой оценкой.
+ * Локальный движок русских шашек с обучаемой оценкой.
  * Оценка = фиксированная часть (материал, эндшпильные знания) + Σ W[k]·признак[k].
- * Веса W обучаются на партиях библиотеки / в самоигре (train-worker.js).
- * Поиск: PVS + TT + killer + history + LMR + futility + quiescence +
- *        тактические расширения + расширение единственного ответа + повторы +
- *        правило тихих ходов + постоянный кеш окончаний (≤5 фигур) +
+ * Веса W обучаются (train-worker.js) на партиях библиотеки и в самоигре.
+ * Поиск: PVS + TT(границы+TT-ход) + killer + history + LMR + futility + quiescence +
+ *        тактические расширения (взятия/превращения) + расширение единственного ответа +
+ *        повторы + правило тихих ходов + кеш окончаний (≤5 фигур) +
  *        итеративное углубление с полным бюджетом времени.
- * Знания: книга (+20) и авто-книга по очковости баз — мягкий приор рекомендаций.
+ * Знания: дебютная книга (+20) и авто-книга по очковости баз — мягкий приор.
+ * Эндшпильные базы: внешний зонд (setTablebaseProbe) — точные ±MATE/ничья.
  */
 import {
   WHITE, BLACK, getLegalMoves, makeMove, getGameStatus,
   colorOf, isKingPiece, isManPiece, fileOf, rankOf, moveToString, stateToFEN,
 } from './engine.js';
-import { tbKey, tbValueToScore } from './tb.js';
+import { tbValueToScore } from './tb.js';
 
 const MAN = 100, KING = 330, MATE = 100000, QDEPTH = 4, QUIET_DRAW = 30, TT_MAX = 300000, EG_MAX = 300000;
 let nodes = 0, deadline = 0;
-const tt = new Map();
-const hist = new Map();
-let killers = [];
-const pathMap = new Map();
-const egCache = new Map();
+const tt = new Map();        // транспозиции
+const hist = new Map();      // history-эвристика
+let killers = [];            // killer-ходы по пли
+const pathMap = new Map();   // повторы в текущей линии
+const egCache = new Map();   // кеш решённых окончаний (≤5 фигур)
 
+/* ── геометрия и таблицы ценности полей (теория русских шашек) ── */
 const sq = (f, r) => r * 8 + f;
 const centerish = (i) => { const f = fileOf(i), r = rankOf(i); return f >= 2 && f <= 5 && r >= 2 && r <= 5; };
 const longDiag = (i) => fileOf(i) === rankOf(i) || fileOf(i) + rankOf(i) === 7;
 const inB = (f, r) => f >= 0 && f < 8 && r >= 0 && r < 8;
-
-/* ── таблицы ценности полей (теория русских шашек) ── */
-const GOLD_W = new Set([sq(3, 3), sq(5, 3), sq(2, 4), sq(4, 4)]);
-const CENTER_W = new Set([sq(2, 2), sq(4, 2), sq(3, 1), sq(5, 1)]);
+const GOLD_W = new Set([sq(3, 3), sq(5, 3), sq(2, 4), sq(4, 4)]);   // d4 f4 c5 e5
+const CENTER_W = new Set([sq(2, 2), sq(4, 2), sq(3, 1), sq(5, 1)]); // c3 e3 d2 f2
 const GOLD_B = new Set([sq(3, 4), sq(5, 4), sq(2, 3), sq(4, 3)]);
 const CENTER_B = new Set([sq(2, 5), sq(4, 5), sq(3, 6), sq(5, 6)]);
-const BACKWARD_W = new Set([sq(0, 0), sq(7, 1)]);
-const BACKWARD_B = new Set([sq(7, 7), sq(0, 6)]);
+const BACKWARD_W = new Set([sq(0, 0), sq(7, 1)]);                   // a1 h2
+const BACKWARD_B = new Set([sq(7, 7), sq(0, 6)]);                   // h8 a7
 
-let TB = null;
-export function setTablebase(map) { TB = map; }
+/* ── зонд эндшпильных баз (ставится ai-worker'ом) ── */
+let tbProbeFn = null;
+export function setTablebaseProbe(fn) { tbProbeFn = fn; }
 
-/* ── обучаемые веса оценки ──
-   Значения по умолчанию дают поведение, идентичное прежней evaluate().
-   При обучении меняются только позиционные признаки; материал (MAN/KING) остаётся фиксированным. */
+/* ── обучаемые веса оценки (материал фиксирован, учатся только признаки) ── */
 export const WEIGHT_DEFAULTS = {
   adv: 3, gold: 12, center: 6, edge: -6, backward: -3,
   support: 4, isolated: -6, column: 4, bridge: 3, kol: 8, outpost: 6,
   passedEarly: 5, passedLate: 12, mobility: 2, development: 2,
-  frozen: 6,    // связанные/запертые шашки соперника — хорошо
-  mobDiff: 1,   // перевес по мобильности (цугцванг-прокси) — хорошо
+  frozen: 6, mobDiff: 1,
 };
-
 let W = { ...WEIGHT_DEFAULTS };
 export function setWeights(w) { W = { ...WEIGHT_DEFAULTS, ...(w || {}) }; }
 export function getWeights() { return { ...W }; }
@@ -58,6 +55,7 @@ let boardRef = null;
 function friendlyAt(f, r, color) { return inB(f, r) && boardRef[r * 8 + f] && colorOf(boardRef[r * 8 + f]) === color; }
 function pieceCount(state) { let t = 0; for (const p of state.board) if (p) t++; return t; }
 
+/** Проходная шашка: на обеих передних диагоналях нет вражеских простых-перехватчиков. */
 function passedMan(state, i, w) {
   const f = fileOf(i), r = rankOf(i), step = w ? 1 : -1, enemy = w ? BLACK : WHITE;
   for (const df of [-1, 1]) {
@@ -74,11 +72,11 @@ function passedMan(state, i, w) {
 /** true, если у простой шашки цвета w на i нет ни тихого хода, ни взятия (связана/заперта). */
 function hasAnyMove(state, i, w) {
   const f = fileOf(i), r = rankOf(i), dir = w ? 1 : -1, me = w ? WHITE : BLACK;
-  for (const df of [-1, 1]) {                       // тихие ходы вперёд
+  for (const df of [-1, 1]) {
     const nf = f + df, nr = r + dir;
     if (inB(nf, nr) && !state.board[nr * 8 + nf]) return true;
   }
-  for (const [df, dr] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {   // взятия во все стороны
+  for (const [df, dr] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
     const nf = f + df, nr = r + dr, bf = f + 2 * df, br = r + 2 * dr;
     if (!inB(nf, nr) || !inB(bf, br)) continue;
     const p = state.board[nr * 8 + nf];
@@ -87,12 +85,14 @@ function hasAnyMove(state, i, w) {
   return false;
 }
 
+/** Материал с точки зрения стороны, которой ходить (микродобавка к матовой оценке). */
 function materialSide(state) {
   let s = 0;
   for (const p of state.board) if (p) { const v = isKingPiece(p) ? KING : MAN; s += colorOf(p) === WHITE ? v : -v; }
   return (state.turn === WHITE ? 1 : -1) * s;
 }
 
+/** Ручные эндшпильные знания (действуют, пока база не покрыла состав). */
 function endgameKnowledge(total, matW, wMen, bMen, wK, bK) {
   if (total > 6) return 0;
   let b = 0;
@@ -105,14 +105,14 @@ function endgameKnowledge(total, matW, wMen, bMen, wK, bK) {
   return b;
 }
 
-/** Вычисляет агрегаты признаков и фиксированную часть оценки. */
+/** Агрегаты признаков (с позиции белых) + фиксированная часть оценки. */
 function computeAggs(state) {
   boardRef = state.board;
   let fixed = 0, total = 0, wMen = 0, bMen = 0, wK = 0, bK = 0, matW = 0;
   const A = {
     adv: 0, gold: 0, center: 0, edge: 0, backward: 0,
     support: 0, isolated: 0, column: 0, bridge: 0, kol: 0, outpost: 0,
-    passedEarly: 0, passedLate: 0, mobility: 0, development: 0, 
+    passedEarly: 0, passedLate: 0, mobility: 0, development: 0,
     frozen: 0, mobDiff: 0,
   };
   for (let i = 0; i < 64; i++) {
@@ -144,23 +144,21 @@ function computeAggs(state) {
       if (total <= 12 && passedMan(state, i, w)) {
         if (total <= 8) A.passedLate += sgn; else A.passedEarly += sgn;
       }
-      if (!hasAnyMove(state, i, w)) A.frozen += w ? -1 : 1;  // своя запертая — плохо, чужая — хорошо    }
+      if (!hasAnyMove(state, i, w)) A.frozen += w ? -1 : 1; // своя запертая — плохо, чужая — хорошо
+    }
   }
   const totalMen = wMen + bMen;
-  if (matW > 0) fixed += totalMen * 3; else if (matW < 0) fixed -= totalMen * 3;
-
+  if (matW > 0) fixed += totalMen * 3; else if (matW < 0) fixed -= totalMen * 3; // анти-разменный bias
   const mobSide = getLegalMoves(state).length;
   A.mobility = (state.turn === WHITE ? 1 : -1) * mobSide;
-  if (total <= 16) {
+  if (total <= 16) { // цугцванг-прокси: перевес по мобильности
     const other = state.turn === WHITE ? BLACK : WHITE;
     const mobOther = getLegalMoves({ ...state, turn: other }).length;
     const mobW = state.turn === WHITE ? mobSide : mobOther;
     const mobB = state.turn === WHITE ? mobOther : mobSide;
-    A.mobDiff = mobW - mobB;   // у кого больше ходов, тот реже попадает в цугцванг
+    A.mobDiff = mobW - mobB;
   }
-    
-  A.mobility = (state.turn === WHITE ? 1 : -1) * getLegalMoves(state).length;
-  if (total > 18) {
+  if (total > 18) { // темп развития в дебюте
     let dev = 0;
     for (let i = 0; i < 64; i++) {
       const p = state.board[i];
@@ -172,7 +170,7 @@ function computeAggs(state) {
     A.development = dev;
   }
   return { A, fixed, total, totalMen, matW, wK, bK, wMen, bMen };
-}}
+}
 
 /** Вектор признаков с позиции белых — для обучающего воркера. */
 export function phiWhite(state) { return computeAggs(state).A; }
@@ -182,8 +180,8 @@ export function evaluate(state) {
   const { A, fixed, total, totalMen, matW, wK, bK, wMen, bMen } = computeAggs(state);
   let base = fixed;
   for (const k in W) base += W[k] * (A[k] || 0);
-  if (total <= 6 && Math.abs(matW) <= MAN) base = Math.round(base * 0.6);
-  if (totalMen === 0) {
+  if (total <= 6 && Math.abs(matW) <= MAN) base = Math.round(base * 0.6);   // ничейная шкала
+  if (totalMen === 0) {                                                      // гашение дамочных
     const kd = Math.abs(wK - bK);
     base = Math.sign(base) * Math.min(Math.abs(base), kd >= 2 ? 300 : 60);
   }
@@ -224,14 +222,16 @@ function orderMoves(moves, ttMove, ply) {
 function pvs(state, depth, alpha, beta, ply, quiet) {
   nodes++;
   if ((nodes & 127) === 0 && Date.now() > deadline) throw 0;
+  // матовая оценка + микродобавка материала: среди равных по сроку мата — не отдавать шашки
   if (getGameStatus(state).over) return -(MATE + depth) + materialSide(state) * 0.001;
-  if (quiet >= QUIET_DRAW) return 0;
+  if (quiet >= QUIET_DRAW) return 0;                    // правило тихих ходов — ничья
   const key = stateToFEN(state);
   const seen = pathMap.get(key) || 0;
-  if (seen >= 1) return 0;
+  if (seen >= 1) return 0;                              // повтор в линии — ничья
   pathMap.set(key, seen + 1);
   try {
-    if (TB) { const tv = TB.get(tbKey(state)); if (tv !== undefined) return tbValueToScore(tv); }
+    // точный зонд эндшпильных баз — до кешей и поиска
+    if (tbProbeFn) { const tv = tbProbeFn(state); if (tv != null) return tbValueToScore(tv); }
     const total = pieceCount(state);
     if (total <= 5) { const c = egCache.get(key); if (c !== undefined) return c; }
     const e = tt.get(key); let ttMove = null;
@@ -245,7 +245,7 @@ function pvs(state, depth, alpha, beta, ply, quiet) {
       }
     }
     const movesAll = getLegalMoves(state);
-    if (movesAll.length === 1 && ply > 0 && depth < 26) depth += 1;
+    if (movesAll.length === 1 && ply > 0 && depth < 26) depth += 1; // единственный ответ — глубже
     if (depth <= 0) return qsearch(state, QDEPTH, alpha, beta);
     orderMoves(movesAll, ttMove, ply);
     const a0 = alpha; let best = -Infinity, bestMove = movesAll[0];
@@ -259,10 +259,10 @@ function pvs(state, depth, alpha, beta, ply, quiet) {
       const promotes = m.king && isManPiece(piece);
       const manMoved = !m.isCapture && isManPiece(piece);
       const nq = (m.isCapture || manMoved) ? 0 : quiet + 1;
-      const ext = (m.isCapture || promotes) ? 1 : 0;
+      const ext = (m.isCapture || promotes) ? 1 : 0;    // тактическое расширение
       let d = depth - 1 + ext;
       if (d > depth) d = depth;
-      if (i >= 4 && depth >= 3 && !m.isCapture && !promotes) d -= 1;
+      if (i >= 4 && depth >= 3 && !m.isCapture && !promotes) d -= 1; // LMR (безопасный)
       let v;
       if (legal === 1) v = -pvs(makeMove(state, m), d, -beta, -alpha, ply + 1, nq);
       else {
@@ -337,6 +337,7 @@ function pvLine(state, first, depth) {
   return pv.join(' ');
 }
 
+/** Практический приор: книга + авто-книга по очковости баз. */
 function knowledgeBonus(m, extra) {
   if (!extra) return 0;
   let b = 0;
@@ -351,6 +352,7 @@ function knowledgeBonus(m, extra) {
   return b;
 }
 
+/** Анализ позиции: итеративное углубление с полным бюджетом времени. */
 export function analyze(state, { depth, maxDepth, timeMs = 1200, lines = 8 } = {}, extra = null) {
   const t0 = Date.now();
   const st = getGameStatus(state);
@@ -372,8 +374,8 @@ export function analyze(state, { depth, maxDepth, timeMs = 1200, lines = 8 } = {
   if (!res) { res = searchRoot(state, 2, extra, null).res; totalNodes += nodes; }
   const toWhite = state.turn === WHITE ? (x) => x : (x) => -x;
   for (const r of res) {
-    r.raw = toWhite(r.score);
-    if (extra) r.score += knowledgeBonus(r.move, extra);
+    r.raw = toWhite(r.score);                       // чистая оценка — в цифры
+    if (extra) r.score += knowledgeBonus(r.move, extra); // база влияет на ПОРЯДОК
   }
   res.sort((a, b) => b.score - a.score);
   const L = Math.max(3, lines | 0);
@@ -385,6 +387,7 @@ export function analyze(state, { depth, maxDepth, timeMs = 1200, lines = 8 } = {
   };
 }
 
+/** Грейд хода через тот же analyze() — согласован с панелью; extra не влияет. */
 export function gradeMove(before, after, { depth = 6, timeMs = 700 } = {}) {
   const opts = { depth, timeMs };
   const b = analyze(before, opts, null);

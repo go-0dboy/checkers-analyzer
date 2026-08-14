@@ -1,4 +1,6 @@
 {
   "library": ["games.json"],
-  "openings": ["openings.json"]
+  "openings": ["openings.json"],
+  "weights": "checkers-weights.json",
+  "tb": ["tb-2.bin", "tb-3.bin"]
 }

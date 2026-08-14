@@ -36,19 +36,43 @@ export function downloadText(filename, text, mime = 'application/x-draughts-pdn'
  * Если API недоступно (телефон/старый браузер) — фолбэк на скачивание.
  * @returns {'fs'|'download'|null} канал сохранения или null при отмене диалога.
  */
+/**
+ * Диалог выбора пути и имени (File System Access API).
+ * Возвращает handle файла для повторных записей, либо null,
+ * если API недоступно (телефон) или пользователь отменил диалог.
+ */
+export async function pickSaveHandle(filename, mime = 'application/x-draughts-pdn', opts = {}) {
+  if (!window.showSaveFilePicker) return null;
+  try {
+    return await window.showSaveFilePicker({
+      suggestedName: filename,
+      types: [{ description: opts.description || 'Файл', accept: { [mime]: opts.extensions || ['.txt'] } }],
+    });
+  } catch (e) {
+    return null; // отмена диалога — фолбэки решают сами
+  }
+}
+
+/** Перезапись файла через handle (для автосохранения). */
+export async function writeHandle(handle, text) {
+  const w = await handle.createWritable();
+  await w.write(text);
+  await w.close();
+}
+
+/**
+ * Сохранение файла С ДИАЛОГОМ выбора пути и имени.
+ * Если API недоступно (телефон/старый браузер) — фолбэк на скачивание.
+ * @returns {'fs'|'download'|null} канал сохранения или null при отмене диалога.
+ */
 export async function saveFileWithPicker(filename, text, mime = 'application/x-draughts-pdn', opts = {}) {
   if (window.showSaveFilePicker) {
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName: filename,
-        types: [{
-          description: opts.description || 'Файл',
-          accept: { [mime]: opts.extensions || ['.txt'] },
-        }],
+        types: [{ description: opts.description || 'Файл', accept: { [mime]: opts.extensions || ['.txt'] } }],
       });
-      const w = await handle.createWritable();
-      await w.write(text);
-      await w.close();
+      await writeHandle(handle, text);
       return 'fs';
     } catch (e) {
       if (e?.name === 'AbortError') return null; // пользователь отменил диалог

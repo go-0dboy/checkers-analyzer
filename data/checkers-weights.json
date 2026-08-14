@@ -1,0 +1,1 @@
+{"app":"ru-checkers-weights","weights":{"adv":2.86,"gold":11.96,"center":5.960000000000001,"edge":-5.98,"backward":-3,"support":4,"isolated":-5.940000000000001,"column":3.96,"bridge":3,"kol":8,"outpost":6,"passedEarly":5,"passedLate":12,"mobility":1.8199999999999998,"development":2,"frozen":6,"mobDiff":1.1600000000000001}}
