@@ -1049,7 +1049,7 @@ function ensureTrain() {
   return trainWorker;
 }
 $('#train-run')?.addEventListener('click', () => {
-  const g = sampleGames(5000);
+  const g = sampleGames(1000);
   if (!g.length) { showToast('Библиотека пуста', 'error'); return; }
   const w = ensureTrain(); if (!w) return;
   trainStatus('старт…');
