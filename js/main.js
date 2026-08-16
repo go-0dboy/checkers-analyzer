@@ -961,10 +961,10 @@ window.addEventListener('resize', () => drawAiArrow());
 
 
 
-
-/* ── эндшпильные базы v2: расчёт/сохранение/подключение через manifest ── */
-let tbWorker = null, tbFileHandle = null;
-const tbBlobs = new Map(); // k → Blob (поставляемые и рассчитанные базы)
+/* ── эндшпильные базы v2 (бинарные .bin): расчёт/сохранение/подключение ── */
+let tbWorker = null;
+const tbBlobs = new Map();   // k → Blob подключённых баз (анализ + «lower» для расчёта)
+const tbHandles = new Map(); // k → handle файла автосохранения: СВОЙ на каждый k
 const tbStatus = (t) => { const el = $('#tb-status'); if (el) el.textContent = t; };
 function ensureTB() {
   if (tbWorker === false) return null;
@@ -990,11 +990,11 @@ function onTb(e) {
     const k = Number($('#tb-k')?.value || 0);
     if (d.done) {
       if (d.buf) {
-        tbConnect(k, new Blob([d.buf]));
+        tbConnect(k, new Blob([d.buf], { type: 'application/octet-stream' }));
         tbStatus(`готово · база ${k} подключена`);
         showToast(`База ${k} рассчитана и подключена к анализу`);
-      } else if (tbFileHandle?.getFile) {
-        tbFileHandle.getFile().then((f) => { tbConnect(k, f); tbStatus(`готово · база ${k} из файла`); showToast(`База ${k} записана в файл и подключена`); }).catch(() => {});
+      } else if (tbHandles.get(k)?.getFile) {
+        tbHandles.get(k).getFile().then((f) => { tbConnect(k, f); tbStatus(`готово · база ${k} из файла`); showToast(`База ${k} записана в файл и подключена`); }).catch(() => {});
       } else {
         tbStatus('готово · положите .bin в data/ и добавьте в manifest.json');
         showToast('База рассчитана — положите .bin в data/ и добавьте в manifest.json', 'ok', 6000);
@@ -1009,13 +1009,13 @@ $('#tb-run')?.addEventListener('click', async () => {
   else if (k >= 4 && !confirm('4 фигуры — десятки МБ. Продолжить?')) return;
   const w = ensureTB();
   if (!w) { showToast('Расчёт баз недоступен в этом браузере', 'error'); return; }
-  // файл автосохранения (ПК); телефон считает без файла и подключает базу из памяти
-  if (window.showSaveFilePicker && !tbFileHandle) {
+  // свой файл на каждый k: расчёт большего k НЕ трогает младшие файлы
+  if (window.showSaveFilePicker && !tbHandles.get(k)) {
     try {
-      tbFileHandle = await window.showSaveFilePicker({ suggestedName: `tb-${k}.bin`, types: [{ description: 'Эндшпильная база', accept: { 'application/octet-stream': ['.bin'] } }] });
-      w.postMessage({ cmd: 'set-file', handle: tbFileHandle });
-    } catch (e) { if (e?.name === 'AbortError') tbFileHandle = null; }
-  } else if (tbFileHandle) w.postMessage({ cmd: 'set-file', handle: tbFileHandle });
+      tbHandles.set(k, await window.showSaveFilePicker({ suggestedName: `tb-${k}.bin`, types: [{ description: 'Эндшпильная база', accept: { 'application/octet-stream': ['.bin'] } }] }));
+    } catch (e) { if (e?.name === 'AbortError') { /* отмена диалога — считаем без файла, база подключится из памяти */ } }
+  }
+  if (tbHandles.get(k)) w.postMessage({ cmd: 'set-file', handle: tbHandles.get(k) });
   for (const [k2, blob] of tbBlobs) if (k2 < k) w.postMessage({ cmd: 'lower', k: k2, blob });
   tbStatus('старт…');
   w.postMessage({ cmd: 'run', k });
@@ -1047,8 +1047,6 @@ $('#tb-import')?.addEventListener('change', async (e) => {
   tbStatus(`база ${k} подключена из файла`);
   showToast(`База ${k} подключена к анализу`);
 });
-
-
 
 
 /* ── обучение весов оценки (библиотека + самоигра) ── */
@@ -1098,25 +1096,27 @@ $('#train-import')?.addEventListener('change', async (e) => {
   if (prefs.orientFix !== 2) prefs = savePrefs({ flipped: false, orientFix: 3 });
   if (THEME_IDS.includes(prefs.theme)) document.documentElement.dataset.theme = prefs.theme;
   document.documentElement.dataset.board = BOARD_IDS.includes(prefs.board) ? prefs.board : 'classic';
+
   // поставляемые знания: веса + эндшпильные базы из manifest.json
   fetch('data/manifest.json', { cache: 'no-store' }).then((r) => r.ok ? r.json() : {}).then(async (man) => {
-  if (!loadPrefs().aiWeights && man.weights) {
-    fetch('data/' + man.weights, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((j) => {
-      if (j?.weights && aiWorker) aiWorker.postMessage({ cmd: 'weights', weights: j.weights });
-    }).catch(() => {});
-  }
-  await ensureAi();
-  for (const f of (man.tb || [])) {
-    const k = Number(/tb-(\d+)\.bin/.exec(f)?.[1] || 0);
-    if (!k) continue;
-    try {
-      const blob = await fetch('data/' + f, { cache: 'no-store' }).then((r) => r.ok ? r.blob() : null);
-      if (blob) tbConnect(k, blob);
-    } catch { /* файла нет — пропускаем */ }
-  }
-  if ((man.tb || []).length) tbStatus(`базы из manifest: ${man.tb.join(', ')}`);
-}).catch(() => {});
-
+    await ensureAi();
+    if (!loadPrefs().aiWeights && man.weights) {
+      try {
+        const j = await fetch('data/' + man.weights, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null);
+        if (j?.weights && aiWorker) aiWorker.postMessage({ cmd: 'weights', weights: j.weights });
+      } catch { /* нет файла весов — остаются стандартные */ }
+    }
+    for (const f of (man.tb || [])) {
+      const k = Number(/tb-(\d+)\.bin/.exec(f)?.[1] || 0);
+      if (!k) continue;
+      try {
+        const blob = await fetch('data/' + f, { cache: 'no-store' }).then((r) => r.ok ? r.blob() : null);
+        if (blob) tbConnect(k, blob);
+      } catch { /* файла нет — пропускаем */ }
+    }
+    if ((man.tb || []).length) tbStatus(`базы из manifest: ${man.tb.join(', ')}`);
+  }).catch(() => {});
+  
 
   idbSeedIfEmpty();
   bindThemePickers();
